@@ -2,6 +2,7 @@
 
 > **Last updated:** 2026-04-03
 > **Session:** Initial architecture, research, and Phase 0 scaffold
+> **As-built:** [docs/PHASE-0-AS-BUILT.md](docs/PHASE-0-AS-BUILT.md)
 > **Next session starts here**
 
 ---
