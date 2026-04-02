@@ -8,6 +8,7 @@ import (
 
 	"github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/graph"
@@ -389,13 +390,19 @@ var todoTasksListCmd = &cobra.Command{
 			return err
 		}
 
-		// Fetch tasks (first page — pagination TODO for very large lists)
-		result, err := client.Me().Todo().Lists().ByTodoTaskListId(listID).Tasks().Get(ctx, nil)
+		// Fetch all tasks — request up to 999 per page (Graph API max)
+		var tasks []models.TodoTaskable
+		top := int32(999)
+		reqConfig := &users.ItemTodoListsItemTasksRequestBuilderGetRequestConfiguration{
+			QueryParameters: &users.ItemTodoListsItemTasksRequestBuilderGetQueryParameters{
+				Top: &top,
+			},
+		}
+		result, err := client.Me().Todo().Lists().ByTodoTaskListId(listID).Tasks().Get(ctx, reqConfig)
 		if err != nil {
 			return fmt.Errorf("fetching tasks: %w", err)
 		}
-
-		tasks := result.GetValue()
+		tasks = append(tasks, result.GetValue()...)
 		format := output.Resolve(flagJSON, flagPlain)
 
 		switch format {
