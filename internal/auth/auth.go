@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/nz365guy/cb365/internal/config"
+	"github.com/nz365guy/cb365/internal/graph"
 )
 
 // graphScope converts short scope names to full Graph URIs
@@ -31,8 +33,20 @@ func GraphScopes(scopes []string) []string {
 	return full
 }
 
+// ShouldUseIPv4 returns true if IPv4-only transport should be used.
+// Checks CB365_IPV4_ONLY env var and config setting.
+func ShouldUseIPv4(cfg *config.Config) bool {
+	if os.Getenv("CB365_IPV4_ONLY") == "1" {
+		return true
+	}
+	if cfg != nil && cfg.Settings.IPv4Only {
+		return true
+	}
+	return false
+}
+
 // LoginDelegated performs device-code flow authentication
-func LoginDelegated(ctx context.Context, profile *config.Profile) (azcore.AccessToken, error) {
+func LoginDelegated(ctx context.Context, profile *config.Profile, ipv4Only bool) (azcore.AccessToken, error) {
 	opts := &azidentity.DeviceCodeCredentialOptions{
 		TenantID: profile.TenantID,
 		ClientID: profile.ClientID,
@@ -42,6 +56,13 @@ func LoginDelegated(ctx context.Context, profile *config.Profile) (azcore.Access
 			fmt.Println()
 			return nil
 		},
+	}
+
+	// Wire in IPv4-only transport if needed (Azure NZ North IPv6 egress broken)
+	if ipv4Only {
+		opts.ClientOptions = azcore.ClientOptions{
+			Transport: graph.NewIPv4HTTPClient(),
+		}
 	}
 
 	cred, err := azidentity.NewDeviceCodeCredential(opts)
@@ -67,15 +88,15 @@ func LoginDelegated(ctx context.Context, profile *config.Profile) (azcore.Access
 // TokenInfo represents decoded JWT claims for display
 // SECURITY: This is for display only — never contains the raw token
 type TokenInfo struct {
-	Subject    string   `json:"subject,omitempty"`
-	UPN        string   `json:"upn,omitempty"`
-	Name       string   `json:"name,omitempty"`
-	TenantID   string   `json:"tenant_id,omitempty"`
-	AppName    string   `json:"app_name,omitempty"`
-	Scopes     []string `json:"scopes,omitempty"`
-	ExpiresAt  string   `json:"expires_at,omitempty"`
-	ValidFor   string   `json:"valid_for,omitempty"`
-	IsExpired  bool     `json:"is_expired"`
+	Subject   string   `json:"subject,omitempty"`
+	UPN       string   `json:"upn,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	TenantID  string   `json:"tenant_id,omitempty"`
+	AppName   string   `json:"app_name,omitempty"`
+	Scopes    []string `json:"scopes,omitempty"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+	ValidFor  string   `json:"valid_for,omitempty"`
+	IsExpired bool     `json:"is_expired"`
 }
 
 // DecodeTokenInfo extracts display-safe info from a JWT access token
@@ -86,9 +107,7 @@ func DecodeTokenInfo(accessToken string) (*TokenInfo, error) {
 		return nil, fmt.Errorf("invalid JWT format")
 	}
 
-	// Decode the payload (part 1)
 	payload := parts[1]
-	// Add padding
 	switch len(payload) % 4 {
 	case 2:
 		payload += "=="
@@ -138,3 +157,4 @@ func DecodeTokenInfo(accessToken string) (*TokenInfo, error) {
 
 	return info, nil
 }
+

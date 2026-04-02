@@ -33,6 +33,12 @@ var authLoginCmd = &cobra.Command{
 			return fmt.Errorf("--tenant and --client are required")
 		}
 
+		// Load config for IPv4 setting
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
+
 		profileName := loginName
 		if profileName == "" {
 			profileName = "default"
@@ -51,10 +57,15 @@ var authLoginCmd = &cobra.Command{
 
 		output.Info(fmt.Sprintf("Authenticating profile %q via device code flow...", profileName))
 
+		ipv4Only := auth.ShouldUseIPv4(cfg)
+		if ipv4Only && flagVerbose {
+			output.Info("Using IPv4-only transport (Azure NZ North IPv6 workaround)")
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		token, err := auth.LoginDelegated(ctx, profile)
+		token, err := auth.LoginDelegated(ctx, profile, ipv4Only)
 		if err != nil {
 			return fmt.Errorf("authentication failed: %w", err)
 		}
@@ -65,7 +76,7 @@ var authLoginCmd = &cobra.Command{
 			profile.Username = info.UPN
 		}
 
-		// Store token in OS keychain
+		// Store token securely (OS keychain or encrypted file fallback)
 		cache := &auth.TokenCache{
 			AccessToken: token.Token,
 			ExpiresAt:   token.ExpiresOn.Format(time.RFC3339),
@@ -77,10 +88,6 @@ var authLoginCmd = &cobra.Command{
 		}
 
 		// Save profile to config
-		cfg, err := config.Load()
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
 		cfg.Profiles[profileName] = profile
 		cfg.ActiveProfile = profileName
 		profile.Active = true
@@ -141,13 +148,13 @@ var authStatusCmd = &cobra.Command{
 		switch format {
 		case output.FormatJSON:
 			return output.JSON(map[string]interface{}{
-				"profile":   profileName,
-				"auth_mode": profile.AuthMode,
-				"tenant_id": info.TenantID,
-				"username":  info.UPN,
-				"name":      info.Name,
-				"app":       info.AppName,
-				"scopes":    info.Scopes,
+				"profile":    profileName,
+				"auth_mode":  profile.AuthMode,
+				"tenant_id":  info.TenantID,
+				"username":   info.UPN,
+				"name":       info.Name,
+				"app":        info.AppName,
+				"scopes":     info.Scopes,
 				"expires_at": info.ExpiresAt,
 				"valid_for":  info.ValidFor,
 				"is_expired": info.IsExpired,
@@ -315,3 +322,4 @@ func init() {
 	authCmd.AddCommand(authProfilesCmd)
 	authCmd.AddCommand(authUseCmd)
 }
+

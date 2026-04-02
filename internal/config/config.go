@@ -68,7 +68,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 — path from internal ConfigPath(), not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Config{

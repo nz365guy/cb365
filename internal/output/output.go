@@ -50,7 +50,7 @@ func Table(headers []string, rows [][]string) {
 	for _, row := range rows {
 		fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
-	w.Flush()
+	_ = w.Flush() // #nosec G104 — stdout write failure is unrecoverable
 }
 
 // Success prints a success message to stderr (so stdout stays clean for --json)
