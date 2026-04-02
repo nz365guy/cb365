@@ -4,7 +4,6 @@
 > **Session:** Initial architecture, research, and Phase 0 scaffold
 > **As-built:** [docs/PHASE-0-AS-BUILT.md](docs/PHASE-0-AS-BUILT.md)
 > **Next session starts here**
-> **Blog draft:** [docs/blog-why-i-built-cb365.md](docs/blog-why-i-built-cb365.md) — needs review before publish
 
 ---
 
