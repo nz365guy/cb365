@@ -1,0 +1,12 @@
+# Compiled binaries
+cb365
+*.exe
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local

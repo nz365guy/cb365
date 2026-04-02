@@ -1,0 +1,140 @@
+package auth
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/nz365guy/cb365/internal/config"
+)
+
+// graphScope converts short scope names to full Graph URIs
+func graphScope(s string) string {
+	if strings.HasPrefix(s, "https://") {
+		return s
+	}
+	return "https://graph.microsoft.com/" + s
+}
+
+// GraphScopes converts a list of short scope names to full URIs
+func GraphScopes(scopes []string) []string {
+	full := make([]string, len(scopes))
+	for i, s := range scopes {
+		full[i] = graphScope(s)
+	}
+	return full
+}
+
+// LoginDelegated performs device-code flow authentication
+func LoginDelegated(ctx context.Context, profile *config.Profile) (azcore.AccessToken, error) {
+	opts := &azidentity.DeviceCodeCredentialOptions{
+		TenantID: profile.TenantID,
+		ClientID: profile.ClientID,
+		UserPrompt: func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+			fmt.Println()
+			fmt.Println(msg.Message)
+			fmt.Println()
+			return nil
+		},
+	}
+
+	cred, err := azidentity.NewDeviceCodeCredential(opts)
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("creating device code credential: %w", err)
+	}
+
+	scopes := GraphScopes(profile.Scopes)
+	if len(scopes) == 0 {
+		scopes = []string{"https://graph.microsoft.com/.default"}
+	}
+
+	token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: scopes,
+	})
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("acquiring token: %w", err)
+	}
+
+	return token, nil
+}
+
+// TokenInfo represents decoded JWT claims for display
+// SECURITY: This is for display only — never contains the raw token
+type TokenInfo struct {
+	Subject    string   `json:"subject,omitempty"`
+	UPN        string   `json:"upn,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	TenantID   string   `json:"tenant_id,omitempty"`
+	AppName    string   `json:"app_name,omitempty"`
+	Scopes     []string `json:"scopes,omitempty"`
+	ExpiresAt  string   `json:"expires_at,omitempty"`
+	ValidFor   string   `json:"valid_for,omitempty"`
+	IsExpired  bool     `json:"is_expired"`
+}
+
+// DecodeTokenInfo extracts display-safe info from a JWT access token
+// SECURITY: Only extracts claims — does NOT validate the token signature
+func DecodeTokenInfo(accessToken string) (*TokenInfo, error) {
+	parts := strings.Split(accessToken, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid JWT format")
+	}
+
+	// Decode the payload (part 1)
+	payload := parts[1]
+	// Add padding
+	switch len(payload) % 4 {
+	case 2:
+		payload += "=="
+	case 3:
+		payload += "="
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decoding JWT payload: %w", err)
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return nil, fmt.Errorf("parsing JWT claims: %w", err)
+	}
+
+	info := &TokenInfo{}
+
+	if v, ok := claims["sub"].(string); ok {
+		info.Subject = v
+	}
+	if v, ok := claims["upn"].(string); ok {
+		info.UPN = v
+	}
+	if v, ok := claims["name"].(string); ok {
+		info.Name = v
+	}
+	if v, ok := claims["tid"].(string); ok {
+		info.TenantID = v
+	}
+	if v, ok := claims["app_displayname"].(string); ok {
+		info.AppName = v
+	}
+	if v, ok := claims["scp"].(string); ok {
+		info.Scopes = strings.Split(v, " ")
+	}
+
+	if exp, ok := claims["exp"].(float64); ok {
+		expTime := time.Unix(int64(exp), 0)
+		info.ExpiresAt = expTime.Format(time.RFC3339)
+		info.IsExpired = time.Now().After(expTime)
+		if !info.IsExpired {
+			info.ValidFor = time.Until(expTime).Round(time.Second).String()
+		}
+	}
+
+	return info, nil
+}
