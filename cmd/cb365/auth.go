@@ -26,6 +26,7 @@ var (
 	loginName         string
 	loginMode         string
 	loginClientSecret string
+	loginCertificate  string
 )
 
 var authLoginCmd = &cobra.Command{
@@ -88,9 +89,21 @@ var authLoginCmd = &cobra.Command{
 				loginClientSecret = strings.TrimSpace(string(secret[:n]))
 			}
 
-			output.Info(fmt.Sprintf("Authenticating profile %q via client credentials...", profileName))
+			if loginCertificate != "" {
+				// Certificate-based app-only auth
+				output.Info(fmt.Sprintf("Authenticating profile %q via certificate...", profileName))
 
-			token, err := auth.LoginAppOnly(ctx, profile, loginClientSecret, ipv4Only)
+				certToken, certErr := auth.LoginCertificate(ctx, profile, loginCertificate, ipv4Only)
+				if certErr != nil {
+					return fmt.Errorf("authentication failed: %w", certErr)
+				}
+				tokenStr = certToken.Token
+				expiresOn = certToken.ExpiresOn
+				profile.Username = "(app-only/certificate)"
+			} else {
+				output.Info(fmt.Sprintf("Authenticating profile %q via client credentials...", profileName))
+
+				token, err := auth.LoginAppOnly(ctx, profile, loginClientSecret, ipv4Only)
 			if err != nil {
 				return fmt.Errorf("authentication failed: %w", err)
 			}
@@ -98,8 +111,9 @@ var authLoginCmd = &cobra.Command{
 			expiresOn = token.ExpiresOn
 			clientSecretToStore = loginClientSecret
 
-			// App-only tokens don't have UPN
-			profile.Username = "(app-only)"
+				// App-only tokens don't have UPN
+				profile.Username = "(app-only)"
+			}
 		} else {
 			// Delegated: device-code flow
 			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow...", profileName))
@@ -388,6 +402,7 @@ func init() {
 	authLoginCmd.Flags().StringVar(&loginName, "name", "", "Profile name (default: 'default')")
 	authLoginCmd.Flags().StringVar(&loginMode, "mode", "delegated", "Auth mode: delegated (device-code) or app-only (client credentials)")
 	authLoginCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "Client secret for app-only mode (omit to read from stdin)")
+	authLoginCmd.Flags().StringVar(&loginCertificate, "certificate", "", "Path to PEM file with certificate and private key (app-only mode)")
 
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)

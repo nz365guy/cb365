@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -200,4 +202,86 @@ func RefreshAppOnly(ctx context.Context, profile *config.Profile, cache *TokenCa
 	}
 
 	return LoginAppOnly(ctx, profile, cache.ClientSecret, ipv4Only)
+}
+
+// LoginCertificate performs certificate-based authentication (app-only).
+// The PEM file must contain both the certificate and private key.
+func LoginCertificate(ctx context.Context, profile *config.Profile, pemPath string, ipv4Only bool) (azcore.AccessToken, error) {
+	pemData, err := os.ReadFile(pemPath) // #nosec G304 — path from --certificate CLI flag, not untrusted input
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("reading certificate file: %w", err)
+	}
+
+	var certs []*x509.Certificate
+	var privKey interface{}
+	remaining := pemData
+
+	for {
+		block, rest := pem.Decode(remaining)
+		if block == nil {
+			break
+		}
+		switch block.Type {
+		case "CERTIFICATE":
+			cert, parseErr := x509.ParseCertificate(block.Bytes)
+			if parseErr != nil {
+				return azcore.AccessToken{}, fmt.Errorf("parsing certificate: %w", parseErr)
+			}
+			certs = append(certs, cert)
+		case "RSA PRIVATE KEY":
+			key, parseErr := x509.ParsePKCS1PrivateKey(block.Bytes)
+			if parseErr != nil {
+				return azcore.AccessToken{}, fmt.Errorf("parsing RSA private key: %w", parseErr)
+			}
+			privKey = key
+		case "PRIVATE KEY":
+			key, parseErr := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if parseErr != nil {
+				return azcore.AccessToken{}, fmt.Errorf("parsing PKCS8 private key: %w", parseErr)
+			}
+			privKey = key
+		case "EC PRIVATE KEY":
+			key, parseErr := x509.ParseECPrivateKey(block.Bytes)
+			if parseErr != nil {
+				return azcore.AccessToken{}, fmt.Errorf("parsing EC private key: %w", parseErr)
+			}
+			privKey = key
+		}
+		remaining = rest
+	}
+
+	if len(certs) == 0 {
+		return azcore.AccessToken{}, fmt.Errorf("no certificates found in PEM file")
+	}
+	if privKey == nil {
+		return azcore.AccessToken{}, fmt.Errorf("no private key found in PEM file")
+	}
+
+	opts := &azidentity.ClientCertificateCredentialOptions{}
+	if ipv4Only {
+		opts.ClientOptions = azcore.ClientOptions{
+			Transport: graph.NewIPv4HTTPClient(),
+		}
+	}
+
+	cred, err := azidentity.NewClientCertificateCredential(
+		profile.TenantID, profile.ClientID, certs, privKey, opts,
+	)
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("creating certificate credential: %w", err)
+	}
+
+	scopes := GraphScopes(profile.Scopes)
+	if len(scopes) == 0 {
+		scopes = []string{"https://graph.microsoft.com/.default"}
+	}
+
+	token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: scopes,
+	})
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("acquiring certificate token: %w", err)
+	}
+
+	return token, nil
 }
