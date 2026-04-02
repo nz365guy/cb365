@@ -158,3 +158,46 @@ func DecodeTokenInfo(accessToken string) (*TokenInfo, error) {
 	return info, nil
 }
 
+
+// LoginAppOnly performs client credentials flow authentication (app-only).
+// The client secret is stored encrypted for unattended token refresh.
+func LoginAppOnly(ctx context.Context, profile *config.Profile, clientSecret string, ipv4Only bool) (azcore.AccessToken, error) {
+	opts := &azidentity.ClientSecretCredentialOptions{}
+
+	if ipv4Only {
+		opts.ClientOptions = azcore.ClientOptions{
+			Transport: graph.NewIPv4HTTPClient(),
+		}
+	}
+
+	cred, err := azidentity.NewClientSecretCredential(
+		profile.TenantID, profile.ClientID, clientSecret, opts,
+	)
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("creating client secret credential: %w", err)
+	}
+
+	scopes := GraphScopes(profile.Scopes)
+	if len(scopes) == 0 {
+		scopes = []string{"https://graph.microsoft.com/.default"}
+	}
+
+	token, err := cred.GetToken(ctx, policy.TokenRequestOptions{
+		Scopes: scopes,
+	})
+	if err != nil {
+		return azcore.AccessToken{}, fmt.Errorf("acquiring app-only token: %w", err)
+	}
+
+	return token, nil
+}
+
+// RefreshAppOnly uses a stored client secret to get a fresh app-only token.
+// Returns the new token and updates the cache in place. Caller must persist the cache.
+func RefreshAppOnly(ctx context.Context, profile *config.Profile, cache *TokenCache, ipv4Only bool) (azcore.AccessToken, error) {
+	if cache.ClientSecret == "" {
+		return azcore.AccessToken{}, fmt.Errorf("no client secret stored for profile %q — run 'cb365 auth login --mode app-only' to re-authenticate", profile.Name)
+	}
+
+	return LoginAppOnly(ctx, profile, cache.ClientSecret, ipv4Only)
+}

@@ -18,6 +18,7 @@ const (
 type TokenCache struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
 	ExpiresAt    string `json:"expires_at"`
 	TokenType    string `json:"token_type"`
 	Scope        string `json:"scope"`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"fmt"
 	"time"
 
@@ -19,10 +20,12 @@ var authCmd = &cobra.Command{
 // --- auth login ---
 
 var (
-	loginTenant string
-	loginClient string
-	loginScopes []string
-	loginName   string
+	loginTenant       string
+	loginClient       string
+	loginScopes       []string
+	loginName         string
+	loginMode         string
+	loginClientSecret string
 )
 
 var authLoginCmd = &cobra.Command{
@@ -33,7 +36,11 @@ var authLoginCmd = &cobra.Command{
 			return fmt.Errorf("--tenant and --client are required")
 		}
 
-		// Load config for IPv4 setting
+		mode := config.AuthModeDelegated
+		if loginMode == "app-only" {
+			mode = config.AuthModeAppOnly
+		}
+
 		cfg, err := config.Load()
 		if err != nil {
 			return fmt.Errorf("loading config: %w", err)
@@ -51,11 +58,9 @@ var authLoginCmd = &cobra.Command{
 			Name:     profileName,
 			TenantID: loginTenant,
 			ClientID: loginClient,
-			AuthMode: config.AuthModeDelegated,
+			AuthMode: mode,
 			Scopes:   loginScopes,
 		}
-
-		output.Info(fmt.Sprintf("Authenticating profile %q via device code flow...", profileName))
 
 		ipv4Only := auth.ShouldUseIPv4(cfg)
 		if ipv4Only && flagVerbose {
@@ -65,29 +70,64 @@ var authLoginCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		token, err := auth.LoginDelegated(ctx, profile, ipv4Only)
-		if err != nil {
-			return fmt.Errorf("authentication failed: %w", err)
+		var tokenStr string
+		var expiresOn time.Time
+		var clientSecretToStore string
+
+		if mode == config.AuthModeAppOnly {
+			// App-only: client credentials flow
+			if loginClientSecret == "" {
+				// Try reading from stdin (for piped input)
+				output.Info("Reading client secret from stdin...")
+				var secret []byte
+				secret = make([]byte, 1024)
+				n, readErr := cmd.InOrStdin().Read(secret)
+				if readErr != nil || n == 0 {
+					return fmt.Errorf("--client-secret is required for app-only mode")
+				}
+				loginClientSecret = strings.TrimSpace(string(secret[:n]))
+			}
+
+			output.Info(fmt.Sprintf("Authenticating profile %q via client credentials...", profileName))
+
+			token, err := auth.LoginAppOnly(ctx, profile, loginClientSecret, ipv4Only)
+			if err != nil {
+				return fmt.Errorf("authentication failed: %w", err)
+			}
+			tokenStr = token.Token
+			expiresOn = token.ExpiresOn
+			clientSecretToStore = loginClientSecret
+
+			// App-only tokens don't have UPN
+			profile.Username = "(app-only)"
+		} else {
+			// Delegated: device-code flow
+			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow...", profileName))
+
+			token, err := auth.LoginDelegated(ctx, profile, ipv4Only)
+			if err != nil {
+				return fmt.Errorf("authentication failed: %w", err)
+			}
+			tokenStr = token.Token
+			expiresOn = token.ExpiresOn
+
+			info, decodeErr := auth.DecodeTokenInfo(tokenStr)
+			if decodeErr == nil && info.UPN != "" {
+				profile.Username = info.UPN
+			}
 		}
 
-		// Decode token to get UPN for the profile
-		info, err := auth.DecodeTokenInfo(token.Token)
-		if err == nil && info.UPN != "" {
-			profile.Username = info.UPN
-		}
-
-		// Store token securely (OS keychain or encrypted file fallback)
 		cache := &auth.TokenCache{
-			AccessToken: token.Token,
-			ExpiresAt:   token.ExpiresOn.Format(time.RFC3339),
-			TokenType:   "Bearer",
-			Scope:       fmt.Sprintf("%v", profile.Scopes),
+			AccessToken:  tokenStr,
+			ClientSecret: clientSecretToStore,
+			ExpiresAt:    expiresOn.Format(time.RFC3339),
+			TokenType:    "Bearer",
+			Scope:        fmt.Sprintf("%v", profile.Scopes),
 		}
 		if err := auth.StoreToken(profileName, cache); err != nil {
 			return fmt.Errorf("storing token: %w", err)
 		}
 
-		// Save profile to config
 		cfg.Profiles[profileName] = profile
 		cfg.ActiveProfile = profileName
 		profile.Active = true
@@ -98,14 +138,15 @@ var authLoginCmd = &cobra.Command{
 		format := output.Resolve(flagJSON, flagPlain)
 		if format == output.FormatJSON {
 			return output.JSON(map[string]interface{}{
-				"profile":  profileName,
-				"username": profile.Username,
-				"tenant":   profile.TenantID,
-				"status":   "authenticated",
+				"profile":   profileName,
+				"username":  profile.Username,
+				"tenant":    profile.TenantID,
+				"auth_mode": string(mode),
+				"status":    "authenticated",
 			})
 		}
 
-		output.Success(fmt.Sprintf("Authenticated as %s (profile: %s)", profile.Username, profileName))
+		output.Success(fmt.Sprintf("Authenticated as %s (profile: %s, mode: %s)", profile.Username, profileName, mode))
 		return nil
 	},
 }
@@ -137,6 +178,36 @@ var authStatusCmd = &cobra.Command{
 		cache, err := auth.LoadToken(profileName)
 		if err != nil {
 			return err
+		}
+
+		// Auto-refresh expired app-only tokens using stored client secret
+		if profile.AuthMode == config.AuthModeAppOnly && cache.ClientSecret != "" {
+			info, decodeErr := auth.DecodeTokenInfo(cache.AccessToken)
+			if decodeErr != nil || info.IsExpired {
+				cfg2, _ := config.Load()
+				ipv4Only := auth.ShouldUseIPv4(cfg2)
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				if flagVerbose {
+					output.Info("Token expired — refreshing via client credentials...")
+				}
+
+				token, refreshErr := auth.RefreshAppOnly(ctx, profile, cache, ipv4Only)
+				if refreshErr != nil {
+					return fmt.Errorf("auto-refresh failed: %w", refreshErr)
+				}
+
+				cache.AccessToken = token.Token
+				cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
+				if err := auth.StoreToken(profileName, cache); err != nil {
+					return fmt.Errorf("storing refreshed token: %w", err)
+				}
+
+				if flagVerbose {
+					output.Success("Token refreshed successfully")
+				}
+			}
 		}
 
 		info, err := auth.DecodeTokenInfo(cache.AccessToken)
@@ -315,6 +386,8 @@ func init() {
 	authLoginCmd.Flags().StringVar(&loginClient, "client", "", "Entra ID application (client) ID")
 	authLoginCmd.Flags().StringSliceVar(&loginScopes, "scopes", nil, "Graph API scopes (e.g. Tasks.ReadWrite,Mail.Read)")
 	authLoginCmd.Flags().StringVar(&loginName, "name", "", "Profile name (default: 'default')")
+	authLoginCmd.Flags().StringVar(&loginMode, "mode", "delegated", "Auth mode: delegated (device-code) or app-only (client credentials)")
+	authLoginCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "Client secret for app-only mode (omit to read from stdin)")
 
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)

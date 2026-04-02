@@ -42,16 +42,43 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		return nil, fmt.Errorf("no active profile — run 'cb365 auth login' first")
 	}
 
+	profile, ok := cfg.Profiles[profileName]
+	if !ok {
+		return nil, fmt.Errorf("profile %q not found", profileName)
+	}
+
 	cache, err := auth.LoadToken(profileName)
 	if err != nil {
 		return nil, fmt.Errorf("loading token: %w", err)
 	}
 
+	ipv4Only := auth.ShouldUseIPv4(cfg)
+
 	info, err := auth.DecodeTokenInfo(cache.AccessToken)
-	if err != nil {
-		return nil, fmt.Errorf("decoding token: %w", err)
-	}
-	if info.IsExpired {
+	if err != nil || info.IsExpired {
+		// Auto-refresh for app-only profiles
+		if profile.AuthMode == config.AuthModeAppOnly && cache.ClientSecret != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if flagVerbose {
+				output.Info("Token expired — refreshing via client credentials...")
+			}
+
+			token, refreshErr := auth.RefreshAppOnly(ctx, profile, cache, ipv4Only)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("auto-refresh failed: %w", refreshErr)
+			}
+
+			cache.AccessToken = token.Token
+			cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
+			if storeErr := auth.StoreToken(profileName, cache); storeErr != nil {
+				return nil, fmt.Errorf("storing refreshed token: %w", storeErr)
+			}
+
+			return graph.NewGraphClient(cache.AccessToken, token.ExpiresOn, ipv4Only)
+		}
+
 		return nil, fmt.Errorf("token expired — run 'cb365 auth login' to re-authenticate")
 	}
 
@@ -60,7 +87,6 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		return nil, fmt.Errorf("parsing token expiry: %w", err)
 	}
 
-	ipv4Only := auth.ShouldUseIPv4(cfg)
 	return graph.NewGraphClient(cache.AccessToken, expiresAt, ipv4Only)
 }
 
