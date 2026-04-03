@@ -13,6 +13,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Internal domain for external-send warnings
+const internalDomain = "cloverbase.com"
+
+// auditFooter is appended to all agent-sent emails for audit trail.
+const auditFooter = "\n\n---\n[Sent via cb365]"
+
 // ──────────────────────────────────────────────
 //  Mail helpers
 // ──────────────────────────────────────────────
@@ -66,6 +72,37 @@ func isDelegatedProfile() (bool, error) {
 		return false, fmt.Errorf("profile %q not found", profileName)
 	}
 	return profile.AuthMode == config.AuthModeDelegated, nil
+}
+
+// countRecipients counts total recipients from comma-separated to and cc strings.
+func countRecipients(to, cc string) int {
+	count := 0
+	for _, addr := range strings.Split(to, ",") {
+		if strings.TrimSpace(addr) != "" {
+			count++
+		}
+	}
+	if cc != "" {
+		for _, addr := range strings.Split(cc, ",") {
+			if strings.TrimSpace(addr) != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// externalRecipients returns addresses not matching the internal domain.
+func externalRecipients(to, cc string) []string {
+	var ext []string
+	all := strings.Split(to+","+cc, ",")
+	for _, addr := range all {
+		trimmed := strings.TrimSpace(addr)
+		if trimmed != "" && !strings.HasSuffix(strings.ToLower(trimmed), "@"+internalDomain) {
+			ext = append(ext, trimmed)
+		}
+	}
+	return ext
 }
 
 // formatMessageJSON builds a JSON-serialisable map from a Message.
@@ -319,6 +356,7 @@ var (
 	mailSendSubject string
 	mailSendBody    string
 	mailSendConfirm bool
+	mailSendForce   bool
 )
 
 var mailSendCmd = &cobra.Command{
@@ -336,6 +374,18 @@ var mailSendCmd = &cobra.Command{
 		}
 		if delegated && !mailSendConfirm {
 			return fmt.Errorf("delegated mode requires --confirm to send mail (safety guard against accidental sends)")
+		}
+
+		// Safety: >10 recipients requires --force
+		totalRecipients := countRecipients(mailSendTo, mailSendCC)
+		if totalRecipients > 10 && !mailSendForce {
+			return fmt.Errorf("sending to %d recipients requires --force (blast radius guard)", totalRecipients)
+		}
+
+		// Safety: warn about external recipients
+		ext := externalRecipients(mailSendTo, mailSendCC)
+		if len(ext) > 0 {
+			output.Info(fmt.Sprintf("Note: sending to %d external recipient(s): %s", len(ext), strings.Join(ext, ", ")))
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -366,7 +416,7 @@ var mailSendCmd = &cobra.Command{
 		msg.SetSubject(ptr(mailSendSubject))
 
 		body := models.NewItemBody()
-		body.SetContent(ptr(mailSendBody))
+		body.SetContent(ptr(mailSendBody + auditFooter))
 		contentType := models.TEXT_BODYTYPE
 		body.SetContentType(&contentType)
 		msg.SetBody(body)
@@ -541,6 +591,7 @@ func init() {
 	mailSendCmd.Flags().StringVar(&mailSendSubject, "subject", "", "Email subject")
 	mailSendCmd.Flags().StringVar(&mailSendBody, "body", "", "Email body (plain text)")
 	mailSendCmd.Flags().BoolVar(&mailSendConfirm, "confirm", false, "Confirm send (required in delegated mode)")
+	mailSendCmd.Flags().BoolVar(&mailSendForce, "force", false, "Override recipient count guard (>10 recipients)")
 
 	// mail search
 	mailSearchCmd.Flags().StringVar(&mailSearchQuery, "query", "", "Search query")
@@ -552,4 +603,5 @@ func init() {
 	mailCmd.AddCommand(mailSendCmd)
 	mailCmd.AddCommand(mailSearchCmd)
 }
+
 
