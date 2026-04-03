@@ -1,20 +1,41 @@
 # cb365
 
-Enterprise CLI for Microsoft 365 via Microsoft Graph. Entra ID authenticated. Agent-friendly.
+**Scriptable access to Microsoft 365 from the command line.**
 
-**58 commands** across 10 workloads — To Do, Mail, Calendar, Contacts, Planner, Teams, SharePoint, OneDrive, and Loop. Built in Go with zero runtime dependencies.
+If you need to automate Microsoft 365 — create tasks, send mail, manage calendars, post to Teams, work with SharePoint, OneDrive, or Planner — you currently have two options: write a custom app against the Graph API, or click through the UI by hand. cb365 gives you a third: a single command-line tool that does it all, with structured output that scripts and AI agents can consume directly.
+
+```bash
+# List your tasks as JSON
+cb365 todo tasks list --list "My Tasks" --json
+
+# Create a calendar event with a Teams link
+cb365 calendar create --subject "Design Review" --start "2026-04-10T10:00:00+12:00" \
+  --end "2026-04-10T10:30:00+12:00" --attendee "colleague@example.com" --teams
+
+# Send mail (with safety confirmation)
+cb365 mail send --to "team@example.com" --subject "Update" --body "Shipped v2." --confirm
+```
+
+58 commands across 10 workloads. One binary. Zero runtime dependencies. Built in Go.
 
 > ⚠️ **Pre-release** — cb365 is `v0.1.0`. APIs may change. Review the [security design](#security) before use in production.
 
-## Why cb365?
+## Who Is This For?
 
-Microsoft ships SDKs, not a CLI. If you're building AI agents, automation pipelines, or just want scriptable access to your M365 tenant, you need something between "raw Graph API calls with curl" and "build your own app." cb365 fills that gap:
+- **DevOps and platform engineers** who need to script M365 operations (create tasks from CI, post build results to Teams, sync files to SharePoint)
+- **AI agent builders** who need structured M365 access for autonomous workflows — cb365's `--json` output and safety flags were designed for agent consumption
+- **IT admins** who want a CLI alternative to PowerShell for Graph API operations
+- **Developers** who are tired of writing boilerplate Graph SDK code for simple M365 tasks
 
-- **Single binary** — no runtime, no dependencies, no Docker. Drop it on a server and go.
-- **Agent-first output** — every command supports `--json` and `--plain` (TSV) for machine consumption. Human-readable tables by default.
-- **44 hardcoded safety rules** — write operations require explicit flags (`--force`, `--confirm`). `--dry-run` on everything. Tokens never appear in output at any verbosity level.
-- **Multi-profile** — manage delegated and app-only auth side by side. Switch tenants with `cb365 auth use`.
-- **OS-native token storage** — macOS Keychain, Windows Credential Manager, Linux secret-service. AES-256-GCM encrypted file fallback for headless servers.
+## Why Not Just Use the Graph API Directly?
+
+You can. cb365 is a wrapper around the same Microsoft Graph API. But cb365 handles the parts that slow you down:
+
+- **Authentication** — device-code, client credentials, and certificate flows. Tokens stored in your OS keychain, never in plaintext.
+- **Safety** — 44 hardcoded rules. Deletes require `--force`. Broadcasts require `--confirm`. `--dry-run` on every write. Tokens never appear in output.
+- **Output** — every command supports `--json`, `--plain` (TSV), and human-readable tables. Pipe to `jq`, `cut`, or feed directly to an AI agent.
+- **Profiles** — manage delegated and app-only auth side by side. Switch tenants with `cb365 auth use`.
+- **No dependencies** — single binary. No runtime, no Docker, no Python. Drop it on a server and it works.
 
 ---
 
@@ -375,9 +396,9 @@ cb365 todo tasks list --list "My Tasks" --json | jq '.[].title'
 cb365 calendar list --from 2026-04-01 --to 2026-04-07 --plain | cut -f2
 ```
 
-### Example: OpenCLAW Skill
+### Example: Agent Skill File
 
-cb365 works well with [OpenCLAW](https://github.com/openclaw) agent orchestrators. Create a skill file that teaches your agent the available commands:
+cb365 pairs well with AI agent orchestrators like OpenCLAW, LangChain, AutoGen, or any framework that can execute shell commands. Create a skill file that teaches your agent the available commands:
 
 ```markdown
 # cb365 — Microsoft 365 CLI Skill

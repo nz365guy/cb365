@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in cb365, **do not open a public issue**.
 
-Instead, please email **security@cb365.dev** with:
+Instead, please use [GitHub Security Advisories](https://github.com/nz365guy/cb365/security/advisories/new) to report it privately. Include:
 
 - Description of the vulnerability
 - Steps to reproduce
