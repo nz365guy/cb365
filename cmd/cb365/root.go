@@ -19,7 +19,7 @@ var rootCmd = &cobra.Command{
 Designed for agent consumption with structured JSON output.
 
 Supports Microsoft To Do, Planner, Mail, Calendar, Contacts,
-SharePoint, OneDrive, and Forms via the Microsoft Graph API.`,
+Teams, Loop, SharePoint, and OneDrive via the Microsoft Graph API.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -38,6 +38,10 @@ func init() {
 	rootCmd.AddCommand(calendarCmd)
 	rootCmd.AddCommand(contactsCmd)
 	rootCmd.AddCommand(plannerCmd)
+	rootCmd.AddCommand(teamsCmd)
+	rootCmd.AddCommand(sharepointCmd)
+	rootCmd.AddCommand(onedriveCmd)
+	rootCmd.AddCommand(loopCmd)
 }
 
 var versionCmd = &cobra.Command{
