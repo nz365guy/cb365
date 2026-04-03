@@ -185,7 +185,7 @@ The workspace can be specified by name or container ID.
 Uses app-only auth via the Graph drives API.
 
 Examples:
-  cb365 loop pages list --workspace Cloverbase
+  cb365 loop pages list --workspace "Team Notes"
   cb365 loop pages list --workspace "Microsoft Innovation Podcast" --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
@@ -297,8 +297,8 @@ var loopPagesGetCmd = &cobra.Command{
 	Long: `Download a Loop page (.loop file) from a workspace.
 
 Examples:
-  cb365 loop pages get --workspace Cloverbase --page ITEM_ID --output ./page.loop
-  cb365 loop pages get --workspace Cloverbase --page ITEM_ID     # prints to stdout`,
+  cb365 loop pages get --workspace "Team Notes" --page ITEM_ID --output ./page.loop
+  cb365 loop pages get --workspace "Team Notes" --page ITEM_ID     # prints to stdout`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pageFlag, _ := cmd.Flags().GetString("page")
@@ -398,7 +398,7 @@ var loopPagesDeleteCmd = &cobra.Command{
 This does NOT permanently delete — items can be recovered.
 
 Examples:
-  cb365 loop pages delete --workspace "Cloverbase" --page ITEM_ID --force`,
+  cb365 loop pages delete --workspace "Team Notes" --page ITEM_ID --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pageFlag, _ := cmd.Flags().GetString("page")
@@ -480,8 +480,8 @@ other document types to the workspace drive.
 Safety: --force required to overwrite. 4MB simple upload limit.
 
 Examples:
-  cb365 loop pages upload --workspace "Cloverbase" --file ./page.loop --path "LoopAppData/page.loop"
-  cb365 loop pages upload --workspace "Cloverbase" --file ./notes.loop --path "LoopAppData/notes.loop" --force`,
+  cb365 loop pages upload --workspace "Team Notes" --file ./page.loop --path "LoopAppData/page.loop"
+  cb365 loop pages upload --workspace "Team Notes" --file ./notes.loop --path "LoopAppData/notes.loop" --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		fileFlag, _ := cmd.Flags().GetString("file")
@@ -590,7 +590,7 @@ var loopPagesMkdirCmd = &cobra.Command{
 	Long: `Create a new folder in a Loop workspace.
 
 Examples:
-  cb365 loop pages mkdir --workspace "Cloverbase" --path "LoopAppData/Projects"`,
+  cb365 loop pages mkdir --workspace "Team Notes" --path "LoopAppData/Projects"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pathFlag, _ := cmd.Flags().GetString("path")

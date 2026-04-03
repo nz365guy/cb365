@@ -42,25 +42,25 @@ func TestLoopPagesGetRequiresWorkspaceAndPage(t *testing.T) {
 func TestResolveWorkspaceID(t *testing.T) {
 	cfg := &loopConfig{
 		Workspaces: []loopWorkspace{
-			{ID: "b!abc123", Name: "Cloverbase", DisplayName: "Cloverbase"},
+			{ID: "b!abc123", Name: "Contoso", DisplayName: "Contoso"},
 			{ID: "b!def456", Name: "Pages", DisplayName: "Pages (mark)", Owner: "mark@test.com"},
 		},
 	}
 
 	// By ID
 	ws, err := resolveWorkspaceID(cfg, "b!abc123")
-	if err != nil || ws.Name != "Cloverbase" {
+	if err != nil || ws.Name != "Contoso" {
 		t.Errorf("resolve by ID failed: %v", err)
 	}
 
 	// By name
-	ws, err = resolveWorkspaceID(cfg, "Cloverbase")
+	ws, err = resolveWorkspaceID(cfg, "Contoso")
 	if err != nil || ws.ID != "b!abc123" {
 		t.Errorf("resolve by name failed: %v", err)
 	}
 
 	// Case insensitive
-	ws, err = resolveWorkspaceID(cfg, "cloverbase")
+	ws, err = resolveWorkspaceID(cfg, "contoso")
 	if err != nil || ws.ID != "b!abc123" {
 		t.Errorf("resolve case-insensitive failed: %v", err)
 	}

@@ -124,7 +124,7 @@ func TestSharepointSitesListSearchFlag(t *testing.T) {
 
 func TestFormatSiteURL(t *testing.T) {
 	tests := []struct{ input, expected string }{
-		{"https://cloverbase.sharepoint.com", "https://cloverbase.sharepoint.com"},
+		{"https://contoso.sharepoint.com", "https://contoso.sharepoint.com"},
 		{"", "(unknown)"},
 	}
 	for _, tt := range tests {
