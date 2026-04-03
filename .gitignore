@@ -2,11 +2,21 @@
 /cb365
 *.exe
 
+# GoReleaser
+/dist/
+
 # OS/IDE
 .DS_Store
 .idea/
 .vscode/
+*.swp
+*~
 
 # Environment
 .env
 .env.local
+
+# Test artifacts
+*.test
+coverage.out
+
