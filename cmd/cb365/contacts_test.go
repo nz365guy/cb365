@@ -26,3 +26,32 @@ func TestGetInternalDomainForContacts(t *testing.T) {
 	}
 }
 
+
+func TestContactsCreateRequiresName(t *testing.T) {
+	cmd := contactsCreateCmd
+	if cmd.Flags().Lookup("given-name") == nil {
+		t.Fatal("contacts create missing --given-name flag")
+	}
+	if cmd.Flags().Lookup("surname") == nil {
+		t.Fatal("contacts create missing --surname flag")
+	}
+}
+
+func TestContactsUpdateRequiresID(t *testing.T) {
+	cmd := contactsUpdateCmd
+	if cmd.Flags().Lookup("id") == nil {
+		t.Fatal("contacts update missing --id flag")
+	}
+}
+
+func TestContactsFullCommandStructure(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range contactsCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"list", "get", "search", "create", "update"} {
+		if !found[expected] {
+			t.Errorf("contacts missing subcommand %q", expected)
+		}
+	}
+}

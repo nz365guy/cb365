@@ -367,6 +367,181 @@ var contactsSearchCmd = &cobra.Command{
 //  Wire up commands + flags
 // ══════════════════════════════════════════════
 
+
+// ──────────────────────────────────────────────
+//  contacts create
+// ──────────────────────────────────────────────
+
+var contactsCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new contact",
+	Long: `Create a new Outlook contact.
+
+Examples:
+  cb365 contacts create --given-name "Jane" --surname "Doe" --email "jane@example.com"
+  cb365 contacts create --given-name "John" --surname "Smith" --email "john@acme.com" --company "Acme Corp" --job-title "CEO" --phone "+64 21 555 1234"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		givenName, _ := cmd.Flags().GetString("given-name")
+		surname, _ := cmd.Flags().GetString("surname")
+		email, _ := cmd.Flags().GetString("email")
+		company, _ := cmd.Flags().GetString("company")
+		jobTitle, _ := cmd.Flags().GetString("job-title")
+		phone, _ := cmd.Flags().GetString("phone")
+		department, _ := cmd.Flags().GetString("department")
+		notes, _ := cmd.Flags().GetString("notes")
+
+		if givenName == "" && surname == "" {
+			return fmt.Errorf("at least --given-name or --surname is required")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			displayName := strings.TrimSpace(givenName + " " + surname)
+			output.Info(fmt.Sprintf("[DRY RUN] Would create contact: %s", displayName))
+			return nil
+		}
+
+		contact := models.NewContact()
+		if givenName != "" {
+			contact.SetGivenName(&givenName)
+		}
+		if surname != "" {
+			contact.SetSurname(&surname)
+		}
+		if email != "" {
+			emailAddr := models.NewEmailAddress()
+			emailAddr.SetAddress(&email)
+			emailAddr.SetName(ptr(strings.TrimSpace(givenName + " " + surname)))
+			contact.SetEmailAddresses([]models.EmailAddressable{emailAddr})
+		}
+		if company != "" {
+			contact.SetCompanyName(&company)
+		}
+		if jobTitle != "" {
+			contact.SetJobTitle(&jobTitle)
+		}
+		if phone != "" {
+			contact.SetBusinessPhones([]string{phone})
+		}
+		if department != "" {
+			contact.SetDepartment(&department)
+		}
+		if notes != "" {
+			body := models.NewItemBody()
+			contentType := models.TEXT_BODYTYPE
+			body.SetContentType(&contentType)
+			body.SetContent(&notes)
+			contact.SetPersonalNotes(&notes)
+		}
+
+		created, err := client.Me().Contacts().Post(ctx, contact, nil)
+		if err != nil {
+			return fmt.Errorf("creating contact: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(formatContactJSON(created))
+		default:
+			output.Success(fmt.Sprintf("Created contact: %s (id: %s)", deref(created.GetDisplayName()), deref(created.GetId())))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  contacts update
+// ──────────────────────────────────────────────
+
+var contactsUpdateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Update an existing contact",
+	Long: `Update fields on an existing Outlook contact.
+
+Examples:
+  cb365 contacts update --id CONTACT_ID --company "New Corp"
+  cb365 contacts update --id CONTACT_ID --job-title "CTO" --phone "+64 21 555 9999"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		idFlag, _ := cmd.Flags().GetString("id")
+		givenName, _ := cmd.Flags().GetString("given-name")
+		surname, _ := cmd.Flags().GetString("surname")
+		email, _ := cmd.Flags().GetString("email")
+		company, _ := cmd.Flags().GetString("company")
+		jobTitle, _ := cmd.Flags().GetString("job-title")
+		phone, _ := cmd.Flags().GetString("phone")
+		department, _ := cmd.Flags().GetString("department")
+
+		if idFlag == "" {
+			return fmt.Errorf("--id is required")
+		}
+
+		hasUpdate := givenName != "" || surname != "" || email != "" || company != "" || jobTitle != "" || phone != "" || department != ""
+		if !hasUpdate {
+			return fmt.Errorf("at least one field to update is required")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would update contact %s", idFlag))
+			return nil
+		}
+
+		contact := models.NewContact()
+		if givenName != "" {
+			contact.SetGivenName(&givenName)
+		}
+		if surname != "" {
+			contact.SetSurname(&surname)
+		}
+		if email != "" {
+			emailAddr := models.NewEmailAddress()
+			emailAddr.SetAddress(&email)
+			contact.SetEmailAddresses([]models.EmailAddressable{emailAddr})
+		}
+		if company != "" {
+			contact.SetCompanyName(&company)
+		}
+		if jobTitle != "" {
+			contact.SetJobTitle(&jobTitle)
+		}
+		if phone != "" {
+			contact.SetBusinessPhones([]string{phone})
+		}
+		if department != "" {
+			contact.SetDepartment(&department)
+		}
+
+		updated, err := client.Me().Contacts().ByContactId(idFlag).Patch(ctx, contact, nil)
+		if err != nil {
+			return fmt.Errorf("updating contact: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(formatContactJSON(updated))
+		default:
+			output.Success(fmt.Sprintf("Updated contact: %s", deref(updated.GetDisplayName())))
+		}
+		return nil
+	},
+}
+
 func init() {
 	// contacts list
 	contactsListCmd.Flags().Int32Var(&contactsListMax, "max", 50, "Maximum contacts to return")
@@ -383,6 +558,28 @@ func init() {
 	contactsCmd.AddCommand(contactsListCmd)
 	contactsCmd.AddCommand(contactsGetCmd)
 	contactsCmd.AddCommand(contactsSearchCmd)
+
+	// contacts create
+	contactsCreateCmd.Flags().String("given-name", "", "First name")
+	contactsCreateCmd.Flags().String("surname", "", "Last name")
+	contactsCreateCmd.Flags().String("email", "", "Email address")
+	contactsCreateCmd.Flags().String("company", "", "Company name")
+	contactsCreateCmd.Flags().String("job-title", "", "Job title")
+	contactsCreateCmd.Flags().String("phone", "", "Business phone")
+	contactsCreateCmd.Flags().String("department", "", "Department")
+	contactsCreateCmd.Flags().String("notes", "", "Personal notes")
+	contactsCmd.AddCommand(contactsCreateCmd)
+
+	// contacts update
+	contactsUpdateCmd.Flags().String("id", "", "Contact ID (required)")
+	contactsUpdateCmd.Flags().String("given-name", "", "First name")
+	contactsUpdateCmd.Flags().String("surname", "", "Last name")
+	contactsUpdateCmd.Flags().String("email", "", "Email address")
+	contactsUpdateCmd.Flags().String("company", "", "Company name")
+	contactsUpdateCmd.Flags().String("job-title", "", "Job title")
+	contactsUpdateCmd.Flags().String("phone", "", "Business phone")
+	contactsUpdateCmd.Flags().String("department", "", "Department")
+	contactsCmd.AddCommand(contactsUpdateCmd)
 }
 
 
