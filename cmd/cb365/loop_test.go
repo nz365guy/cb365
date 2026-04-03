@@ -72,3 +72,42 @@ func TestResolveWorkspaceID(t *testing.T) {
 	}
 }
 
+
+func TestLoopPagesDeleteRequiresForce(t *testing.T) {
+	cmd := loopPagesDeleteCmd
+	if cmd.Flags().Lookup("force") == nil {
+		t.Fatal("loop pages delete missing --force flag")
+	}
+	if cmd.Flags().Lookup("force").DefValue != "false" {
+		t.Errorf("--force default should be false")
+	}
+}
+
+func TestLoopPagesUploadRequiresFileAndPath(t *testing.T) {
+	cmd := loopPagesUploadCmd
+	if cmd.Flags().Lookup("file") == nil {
+		t.Fatal("loop pages upload missing --file flag")
+	}
+	if cmd.Flags().Lookup("path") == nil {
+		t.Fatal("loop pages upload missing --path flag")
+	}
+}
+
+func TestLoopPagesMkdirRequiresPath(t *testing.T) {
+	cmd := loopPagesMkdirCmd
+	if cmd.Flags().Lookup("path") == nil {
+		t.Fatal("loop pages mkdir missing --path flag")
+	}
+}
+
+func TestLoopPagesFullCommandStructure(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range loopPagesCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"list", "get", "delete", "upload", "mkdir"} {
+		if !found[expected] {
+			t.Errorf("loop pages missing subcommand %q", expected)
+		}
+	}
+}

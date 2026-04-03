@@ -10,6 +10,7 @@ import (
 	"time"
 
 	drivesPkg "github.com/microsoftgraph/msgraph-sdk-go/drives"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -385,6 +386,295 @@ Examples:
 	},
 }
 
+
+// ──────────────────────────────────────────────
+//  loop pages delete (move to recycle bin)
+// ──────────────────────────────────────────────
+
+var loopPagesDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Move a Loop page to the recycle bin",
+	Long: `Move a page or folder to the workspace recycle bin. Requires --force.
+This does NOT permanently delete — items can be recovered.
+
+Examples:
+  cb365 loop pages delete --workspace "Cloverbase" --page ITEM_ID --force`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		wsFlag, _ := cmd.Flags().GetString("workspace")
+		pageFlag, _ := cmd.Flags().GetString("page")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if wsFlag == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		if pageFlag == "" {
+			return fmt.Errorf("--page is required (item ID from 'cb365 loop pages list')")
+		}
+		if !forceFlag {
+			return fmt.Errorf("moving to recycle bin is destructive — pass --force to confirm")
+		}
+
+		ensureLoopProfile()
+
+		cfg, err := loadLoopConfig()
+		if err != nil {
+			return err
+		}
+
+		ws, err := resolveWorkspaceID(cfg, wsFlag)
+		if err != nil {
+			return err
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would move page %s to recycle bin in %q", pageFlag, ws.Name))
+			return nil
+		}
+
+		// Get workspace drive
+		drive, err := client.Storage().FileStorage().Containers().ByFileStorageContainerId(ws.ID).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting workspace drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(pageFlag).Delete(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("moving to recycle bin: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":        pageFlag,
+				"workspace": ws.Name,
+				"deleted":   true,
+				"note":      "Moved to recycle bin — not permanently deleted",
+			})
+		default:
+			output.Success(fmt.Sprintf("Moved page %s to recycle bin in %q", pageFlag, ws.Name))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  loop pages upload
+// ──────────────────────────────────────────────
+
+var loopPagesUploadCmd = &cobra.Command{
+	Use:   "upload",
+	Short: "Upload a file to a Loop workspace",
+	Long: `Upload a file to a Loop workspace. Can upload .loop files or
+other document types to the workspace drive.
+
+Safety: --force required to overwrite. 4MB simple upload limit.
+
+Examples:
+  cb365 loop pages upload --workspace "Cloverbase" --file ./page.loop --path "LoopAppData/page.loop"
+  cb365 loop pages upload --workspace "Cloverbase" --file ./notes.loop --path "LoopAppData/notes.loop" --force`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		wsFlag, _ := cmd.Flags().GetString("workspace")
+		fileFlag, _ := cmd.Flags().GetString("file")
+		pathFlag, _ := cmd.Flags().GetString("path")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if wsFlag == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		if fileFlag == "" {
+			return fmt.Errorf("--file is required (local file path)")
+		}
+		if pathFlag == "" {
+			return fmt.Errorf("--path is required (destination path in workspace)")
+		}
+
+		info, err := os.Stat(fileFlag)
+		if err != nil {
+			return fmt.Errorf("reading local file: %w", err)
+		}
+
+		const maxSimpleUpload = 4 * 1024 * 1024
+		if info.Size() > maxSimpleUpload {
+			return fmt.Errorf("file is %s — simple upload limit is 4MB", humanFileSize(info.Size()))
+		}
+		if info.Size() == 0 {
+			return fmt.Errorf("file is empty — refusing to upload a 0-byte file")
+		}
+
+		ensureLoopProfile()
+
+		cfg, err := loadLoopConfig()
+		if err != nil {
+			return err
+		}
+
+		ws, err := resolveWorkspaceID(cfg, wsFlag)
+		if err != nil {
+			return err
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		// Get workspace drive
+		drive, err := client.Storage().FileStorage().Containers().ByFileStorageContainerId(ws.ID).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting workspace drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		cleanPath := strings.TrimPrefix(pathFlag, "/")
+		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+
+		// Check if exists (unless --force)
+		if !forceFlag {
+			_, existErr := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Get(ctx, nil)
+			if existErr == nil {
+				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
+			}
+		}
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would upload %s (%s) → %s in %q", fileFlag, humanFileSize(info.Size()), pathFlag, ws.Name))
+			return nil
+		}
+
+		fileContent, err := os.ReadFile(fileFlag) // #nosec G304 — user-specified file
+		if err != nil {
+			return fmt.Errorf("reading file: %w", err)
+		}
+
+		uploaded, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Put(ctx, fileContent, nil)
+		if err != nil {
+			return fmt.Errorf("uploading file: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":        deref(uploaded.GetId()),
+				"name":      deref(uploaded.GetName()),
+				"workspace": ws.Name,
+				"size":      info.Size(),
+			})
+		default:
+			output.Success(fmt.Sprintf("Uploaded %s → %s in %q (%s)", fileFlag, pathFlag, ws.Name, humanFileSize(info.Size())))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  loop pages mkdir
+// ──────────────────────────────────────────────
+
+var loopPagesMkdirCmd = &cobra.Command{
+	Use:   "mkdir",
+	Short: "Create a folder in a Loop workspace",
+	Long: `Create a new folder in a Loop workspace.
+
+Examples:
+  cb365 loop pages mkdir --workspace "Cloverbase" --path "LoopAppData/Projects"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		wsFlag, _ := cmd.Flags().GetString("workspace")
+		pathFlag, _ := cmd.Flags().GetString("path")
+
+		if wsFlag == "" {
+			return fmt.Errorf("--workspace is required")
+		}
+		if pathFlag == "" {
+			return fmt.Errorf("--path is required")
+		}
+
+		ensureLoopProfile()
+
+		cfg, err := loadLoopConfig()
+		if err != nil {
+			return err
+		}
+
+		ws, err := resolveWorkspaceID(cfg, wsFlag)
+		if err != nil {
+			return err
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would create folder %s in %q", pathFlag, ws.Name))
+			return nil
+		}
+
+		// Get workspace drive
+		drive, err := client.Storage().FileStorage().Containers().ByFileStorageContainerId(ws.ID).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting workspace drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		// Split path into parent and folder name
+		cleanPath := strings.TrimPrefix(pathFlag, "/")
+		parts := strings.Split(cleanPath, "/")
+		folderName := parts[len(parts)-1]
+
+		parentID := "root"
+		if len(parts) > 1 {
+			parentPath := strings.Join(parts[:len(parts)-1], "/")
+			parentID = fmt.Sprintf("root:/%s:", parentPath)
+		}
+
+		newFolder := models.NewDriveItem()
+		newFolder.SetName(&folderName)
+		folder := models.NewFolder()
+		newFolder.SetFolder(folder)
+		conflictBehavior := "fail"
+		additionalData := map[string]interface{}{
+			"@microsoft.graph.conflictBehavior": conflictBehavior,
+		}
+		newFolder.SetAdditionalData(additionalData)
+
+		created, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).Children().Post(ctx, newFolder, nil)
+		if err != nil {
+			return fmt.Errorf("creating folder: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":        deref(created.GetId()),
+				"name":      deref(created.GetName()),
+				"workspace": ws.Name,
+			})
+		default:
+			output.Success(fmt.Sprintf("Created folder %s in %q (id: %s)", pathFlag, ws.Name, deref(created.GetId())))
+		}
+		return nil
+	},
+}
+
 // ──────────────────────────────────────────────
 //  Registration
 // ──────────────────────────────────────────────
@@ -403,6 +693,24 @@ func init() {
 	loopPagesGetCmd.Flags().String("page", "", "Page item ID (required)")
 	loopPagesGetCmd.Flags().String("output", "", "Output file path (omit for stdout)")
 	loopPagesCmd.AddCommand(loopPagesGetCmd)
+
+	// loop pages delete
+	loopPagesDeleteCmd.Flags().String("workspace", "", "Workspace name or container ID (required)")
+	loopPagesDeleteCmd.Flags().String("page", "", "Page item ID (required)")
+	loopPagesDeleteCmd.Flags().Bool("force", false, "Confirm move to recycle bin (required)")
+	loopPagesCmd.AddCommand(loopPagesDeleteCmd)
+
+	// loop pages upload
+	loopPagesUploadCmd.Flags().String("workspace", "", "Workspace name or container ID (required)")
+	loopPagesUploadCmd.Flags().String("file", "", "Local file to upload (required)")
+	loopPagesUploadCmd.Flags().String("path", "", "Destination path in workspace (required)")
+	loopPagesUploadCmd.Flags().Bool("force", false, "Overwrite existing file")
+	loopPagesCmd.AddCommand(loopPagesUploadCmd)
+
+	// loop pages mkdir
+	loopPagesMkdirCmd.Flags().String("workspace", "", "Workspace name or container ID (required)")
+	loopPagesMkdirCmd.Flags().String("path", "", "Folder path to create (required)")
+	loopPagesCmd.AddCommand(loopPagesMkdirCmd)
 
 	// Wire up
 	loopCmd.AddCommand(loopWorkspacesCmd)
