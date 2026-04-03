@@ -1,7 +1,17 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/spf13/cobra"
+)
+
+// Set by goreleaser ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 var (
@@ -48,7 +58,25 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Println("cb365 version 0.1.0-dev")
+		if flagJSON {
+			info := map[string]string{
+				"version": version,
+				"commit":  commit,
+				"date":    date,
+				"url":     "https://github.com/nz365guy/cb365",
+			}
+			data, _ := json.MarshalIndent(info, "", "  ")
+			fmt.Println(string(data))
+			return
+		}
+		cmd.Println("cb365 version " + version)
+		if commit != "none" {
+			cmd.Println("commit: " + commit)
+		}
+		if date != "unknown" {
+			cmd.Println("built:  " + date)
+		}
 		cmd.Println("https://github.com/nz365guy/cb365")
 	},
 }
+

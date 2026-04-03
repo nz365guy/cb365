@@ -1,0 +1,126 @@
+version: 2
+
+project_name: cb365
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: cb365
+    main: ./cmd/cb365/
+    binary: cb365
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      - SECURITY.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "${artifact}.sbom.json"
+    cmd: syft
+    args:
+      - "${artifact}"
+      - "--output"
+      - "cyclonedx-json=${document}"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: "^.*feat.*:+.*$"
+      order: 0
+    - title: Fixes
+      regexp: "^.*fix.*:+.*$"
+      order: 1
+    - title: Security
+      regexp: "^.*safety.*:+.*$"
+      order: 2
+    - title: Documentation
+      regexp: "^.*docs.*:+.*$"
+      order: 3
+    - title: CI/CD
+      regexp: "^.*ci.*:+.*$"
+      order: 4
+    - title: Dependencies
+      regexp: "^.*deps.*:+.*$"
+      order: 5
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: nz365guy
+    name: cb365
+  prerelease: auto
+  name_template: "v{{.Version}}"
+  header: |
+    ## cb365 v{{.Version}}
+
+    Enterprise CLI for Microsoft 365 via Microsoft Graph.
+
+    ### Verify Release Integrity
+
+    Download the checksum file and verify:
+
+    ```bash
+    # Verify checksums
+    sha256sum --ignore-missing -c checksums.txt
+
+    # Verify signature (requires cosign)
+    cosign verify-blob \
+      --certificate-identity "https://github.com/nz365guy/cb365/.github/workflows/release.yml@refs/tags/v{{.Version}}" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      --bundle checksums.txt.sigstore.json \
+      checksums.txt
+
+    # Inspect SBOM
+    cat cb365_{{.Version}}_linux_amd64.tar.gz.sbom.json | jq '.components | length'
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/nz365guy/cb365/compare/v{{.PreviousTag}}...v{{.Tag}}
+
