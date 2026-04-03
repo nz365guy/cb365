@@ -33,7 +33,7 @@ func formatSiteURL(webURL string) string {
 var sharepointCmd = &cobra.Command{
 	Use:     "sharepoint",
 	Aliases: []string{"sp"},
-	Short:   "SharePoint — sites, lists, and list items",
+	Short:   "SharePoint — sites, lists, list items, and document libraries",
 }
 
 var sharepointSitesCmd = &cobra.Command{
@@ -44,6 +44,16 @@ var sharepointSitesCmd = &cobra.Command{
 var sharepointListsCmd = &cobra.Command{
 	Use:   "lists",
 	Short: "Manage SharePoint lists",
+}
+
+var sharepointListsItemsCmd = &cobra.Command{
+	Use:   "items",
+	Short: "Manage items in a SharePoint list",
+}
+
+var sharepointFilesCmd = &cobra.Command{
+	Use:   "files",
+	Short: "Manage files in SharePoint document libraries",
 }
 
 // ──────────────────────────────────────────────
@@ -70,69 +80,42 @@ Examples:
 		defer cancel()
 
 		type siteInfo struct {
-			ID          string
-			DisplayName string
-			WebURL      string
-			Description string
+			ID, DisplayName, WebURL, Description string
 		}
 
 		var siteList []siteInfo
 
 		if searchFlag != "" {
-			// Use the search endpoint: GET /sites?search=query
 			config := &sites.SitesRequestBuilderGetRequestConfiguration{
 				QueryParameters: &sites.SitesRequestBuilderGetQueryParameters{
 					Search: &searchFlag,
 				},
 			}
-
 			result, err := client.Sites().Get(ctx, config)
 			if err != nil {
 				return fmt.Errorf("searching sites: %w", err)
 			}
-
 			for _, s := range result.GetValue() {
-				siteList = append(siteList, siteInfo{
-					ID:          deref(s.GetId()),
-					DisplayName: deref(s.GetDisplayName()),
-					WebURL:      deref(s.GetWebUrl()),
-					Description: deref(s.GetDescription()),
-				})
+				siteList = append(siteList, siteInfo{deref(s.GetId()), deref(s.GetDisplayName()), deref(s.GetWebUrl()), deref(s.GetDescription())})
 			}
 		} else {
-			// List root site and sub-sites
-			// GET /sites/root
 			root, err := client.Sites().BySiteId("root").Get(ctx, nil)
 			if err != nil {
 				return fmt.Errorf("getting root site: %w", err)
 			}
-			siteList = append(siteList, siteInfo{
-				ID:          deref(root.GetId()),
-				DisplayName: deref(root.GetDisplayName()),
-				WebURL:      deref(root.GetWebUrl()),
-				Description: deref(root.GetDescription()),
-			})
+			siteList = append(siteList, siteInfo{deref(root.GetId()), deref(root.GetDisplayName()), deref(root.GetWebUrl()), deref(root.GetDescription())})
 
-			// Also try to list all sites (requires Sites.Read.All)
 			allConfig := &sites.SitesRequestBuilderGetRequestConfiguration{
-				QueryParameters: &sites.SitesRequestBuilderGetQueryParameters{
-					Search: ptr("*"),
-				},
+				QueryParameters: &sites.SitesRequestBuilderGetQueryParameters{Search: ptr("*")},
 			}
 			allResult, err := client.Sites().Get(ctx, allConfig)
 			if err == nil {
 				for _, s := range allResult.GetValue() {
 					id := deref(s.GetId())
-					// Skip root (already added)
 					if id == deref(root.GetId()) {
 						continue
 					}
-					siteList = append(siteList, siteInfo{
-						ID:          id,
-						DisplayName: deref(s.GetDisplayName()),
-						WebURL:      deref(s.GetWebUrl()),
-						Description: deref(s.GetDescription()),
-					})
+					siteList = append(siteList, siteInfo{id, deref(s.GetDisplayName()), deref(s.GetWebUrl()), deref(s.GetDescription())})
 				}
 			}
 		}
@@ -142,12 +125,7 @@ Examples:
 		case output.FormatJSON:
 			items := make([]map[string]interface{}, 0, len(siteList))
 			for _, s := range siteList {
-				items = append(items, map[string]interface{}{
-					"id":          s.ID,
-					"displayName": s.DisplayName,
-					"webUrl":      s.WebURL,
-					"description": s.Description,
-				})
+				items = append(items, map[string]interface{}{"id": s.ID, "displayName": s.DisplayName, "webUrl": s.WebURL, "description": s.Description})
 			}
 			return output.JSON(items)
 		case output.FormatPlain:
@@ -184,12 +162,10 @@ var sharepointSitesGetCmd = &cobra.Command{
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
 		}
-
 		client, err := newGraphClient()
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -201,12 +177,7 @@ var sharepointSitesGetCmd = &cobra.Command{
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			item := map[string]interface{}{
-				"id":          deref(site.GetId()),
-				"displayName": deref(site.GetDisplayName()),
-				"webUrl":      deref(site.GetWebUrl()),
-				"description": deref(site.GetDescription()),
-			}
+			item := map[string]interface{}{"id": deref(site.GetId()), "displayName": deref(site.GetDisplayName()), "webUrl": deref(site.GetWebUrl()), "description": deref(site.GetDescription())}
 			if site.GetCreatedDateTime() != nil {
 				item["createdAt"] = site.GetCreatedDateTime().Format(time.RFC3339)
 			}
@@ -235,12 +206,10 @@ var sharepointListsListCmd = &cobra.Command{
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
 		}
-
 		client, err := newGraphClient()
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -248,7 +217,6 @@ var sharepointListsListCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("listing lists: %w", err)
 		}
-
 		lists := result.GetValue()
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -256,14 +224,9 @@ var sharepointListsListCmd = &cobra.Command{
 		case output.FormatJSON:
 			items := make([]map[string]interface{}, 0, len(lists))
 			for _, l := range lists {
-				item := map[string]interface{}{
-					"id":          deref(l.GetId()),
-					"displayName": deref(l.GetDisplayName()),
-					"description": deref(l.GetDescription()),
-					"webUrl":      deref(l.GetWebUrl()),
-				}
+				item := map[string]interface{}{"id": deref(l.GetId()), "displayName": deref(l.GetDisplayName()), "description": deref(l.GetDescription()), "webUrl": deref(l.GetWebUrl())}
 				if l.GetList() != nil && l.GetList().GetTemplate() != nil {
-					if l.GetList().GetTemplate() != nil { item["template"] = *l.GetList().GetTemplate() }
+					item["template"] = *l.GetList().GetTemplate()
 				}
 				items = append(items, item)
 			}
@@ -287,13 +250,8 @@ var sharepointListsListCmd = &cobra.Command{
 }
 
 // ──────────────────────────────────────────────
-//  sharepoint lists items
+//  sharepoint lists items list
 // ──────────────────────────────────────────────
-
-var sharepointListsItemsCmd = &cobra.Command{
-	Use:   "items",
-	Short: "Manage items in a SharePoint list",
-}
 
 var sharepointListsItemsListCmd = &cobra.Command{
 	Use:   "list",
@@ -302,7 +260,6 @@ var sharepointListsItemsListCmd = &cobra.Command{
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
 		maxFlag, _ := cmd.Flags().GetInt("max")
-
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
 		}
@@ -312,29 +269,22 @@ var sharepointListsItemsListCmd = &cobra.Command{
 		if maxFlag <= 0 {
 			maxFlag = 50
 		}
-
 		client, err := newGraphClient()
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		top := int32(maxFlag)
 		expand := []string{"fields"}
 		config := &sites.ItemListsItemItemsRequestBuilderGetRequestConfiguration{
-			QueryParameters: &sites.ItemListsItemItemsRequestBuilderGetQueryParameters{
-				Top:    &top,
-				Expand: expand,
-			},
+			QueryParameters: &sites.ItemListsItemItemsRequestBuilderGetQueryParameters{Top: &top, Expand: expand},
 		}
-
 		result, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Get(ctx, config)
 		if err != nil {
 			return fmt.Errorf("listing items: %w", err)
 		}
-
 		listItems := result.GetValue()
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -342,22 +292,15 @@ var sharepointListsItemsListCmd = &cobra.Command{
 		case output.FormatJSON:
 			items := make([]map[string]interface{}, 0, len(listItems))
 			for _, li := range listItems {
-				item := map[string]interface{}{
-					"id":      deref(li.GetId()),
-					"webUrl":  deref(li.GetWebUrl()),
-				}
+				item := map[string]interface{}{"id": deref(li.GetId()), "webUrl": deref(li.GetWebUrl())}
 				if li.GetCreatedDateTime() != nil {
 					item["createdAt"] = li.GetCreatedDateTime().Format(time.RFC3339)
 				}
 				if li.GetLastModifiedDateTime() != nil {
 					item["lastModified"] = li.GetLastModifiedDateTime().Format(time.RFC3339)
 				}
-				// Include expanded fields
-				if li.GetFields() != nil {
-					fields := li.GetFields().GetAdditionalData()
-					if fields != nil {
-						item["fields"] = fields
-					}
+				if li.GetFields() != nil && li.GetFields().GetAdditionalData() != nil {
+					item["fields"] = li.GetFields().GetAdditionalData()
 				}
 				items = append(items, item)
 			}
@@ -384,7 +327,6 @@ var sharepointListsItemsListCmd = &cobra.Command{
 	},
 }
 
-
 // ──────────────────────────────────────────────
 //  sharepoint lists items create
 // ──────────────────────────────────────────────
@@ -394,11 +336,8 @@ var sharepointListsItemsCreateCmd = &cobra.Command{
 	Short: "Create a new item in a SharePoint list",
 	Long: `Create a new item in a SharePoint list with field values.
 
-Fields are specified as key=value pairs via --field flags.
-
 Examples:
-  cb365 sp lists items create --site SITE_ID --list LIST_ID --field Title="New Item" --field Status="Active"
-  cb365 sp lists items create --site SITE_ID --list LIST_ID --field Title="Task" --json`,
+  cb365 sp lists items create --site SITE --list LIST --field Title="New Item" --field Status="Active"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
@@ -414,7 +353,6 @@ Examples:
 			return fmt.Errorf("at least one --field is required (format: Key=Value)")
 		}
 
-		// Parse field key=value pairs
 		fields := make(map[string]interface{})
 		for _, f := range fieldFlags {
 			parts := strings.SplitN(f, "=", 2)
@@ -428,7 +366,6 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -450,9 +387,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			result := map[string]interface{}{
-				"id": deref(created.GetId()),
-			}
+			result := map[string]interface{}{"id": deref(created.GetId())}
 			if created.GetFields() != nil {
 				result["fields"] = created.GetFields().GetAdditionalData()
 			}
@@ -474,8 +409,7 @@ var sharepointListsItemsUpdateCmd = &cobra.Command{
 	Long: `Update field values on an existing SharePoint list item.
 
 Examples:
-  cb365 sp lists items update --site SITE_ID --list LIST_ID --item ITEM_ID --field Status="Complete"
-  cb365 sp lists items update --site SITE_ID --list LIST_ID --item ITEM_ID --field Title="Updated" --field Priority="High"`,
+  cb365 sp lists items update --site SITE --list LIST --item ITEM --field Status="Complete"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
@@ -492,7 +426,7 @@ Examples:
 			return fmt.Errorf("--item is required")
 		}
 		if len(fieldFlags) == 0 {
-			return fmt.Errorf("at least one --field is required (format: Key=Value)")
+			return fmt.Errorf("at least one --field is required")
 		}
 
 		fields := make(map[string]interface{})
@@ -508,7 +442,6 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -528,11 +461,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			result := map[string]interface{}{
-				"id":     itemFlag,
-				"fields": updated.GetAdditionalData(),
-			}
-			return output.JSON(result)
+			return output.JSON(map[string]interface{}{"id": itemFlag, "fields": updated.GetAdditionalData()})
 		default:
 			output.Success(fmt.Sprintf("Updated list item %s", itemFlag))
 		}
@@ -550,7 +479,7 @@ var sharepointListsItemsDeleteCmd = &cobra.Command{
 	Long: `Delete an item from a SharePoint list. Requires --force.
 
 Examples:
-  cb365 sp lists items delete --site SITE_ID --list LIST_ID --item ITEM_ID --force`,
+  cb365 sp lists items delete --site SITE --list LIST --item ITEM --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
@@ -574,7 +503,6 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -591,10 +519,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(map[string]interface{}{
-				"id":      itemFlag,
-				"deleted": true,
-			})
+			return output.JSON(map[string]interface{}{"id": itemFlag, "deleted": true})
 		default:
 			output.Success(fmt.Sprintf("Deleted list item %s", itemFlag))
 		}
@@ -603,13 +528,8 @@ Examples:
 }
 
 // ──────────────────────────────────────────────
-//  sharepoint files parent + commands
+//  sharepoint files list
 // ──────────────────────────────────────────────
-
-var sharepointFilesCmd = &cobra.Command{
-	Use:   "files",
-	Short: "Manage files in SharePoint document libraries",
-}
 
 var sharepointFilesListCmd = &cobra.Command{
 	Use:   "list",
@@ -622,7 +542,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		pathFlag, _ := cmd.Flags().GetString("path")
-
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
 		}
@@ -631,11 +550,9 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Get the site's default drive (document library)
 		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("getting site drive: %w", err)
@@ -644,15 +561,13 @@ Examples:
 
 		parentID := "root"
 		if pathFlag != "" && pathFlag != "/" {
-			cleanPath := strings.TrimPrefix(pathFlag, "/")
-			parentID = fmt.Sprintf("root:/%s:", cleanPath)
+			parentID = fmt.Sprintf("root:/%s:", strings.TrimPrefix(pathFlag, "/"))
 		}
 
 		result, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).Children().Get(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("listing files: %w", err)
 		}
-
 		items := result.GetValue()
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -660,12 +575,7 @@ Examples:
 		case output.FormatJSON:
 			jsonItems := make([]map[string]interface{}, 0, len(items))
 			for _, item := range items {
-				entry := map[string]interface{}{
-					"id":       deref(item.GetId()),
-					"name":     deref(item.GetName()),
-					"isFolder": item.GetFolder() != nil,
-					"webUrl":   deref(item.GetWebUrl()),
-				}
+				entry := map[string]interface{}{"id": deref(item.GetId()), "name": deref(item.GetName()), "isFolder": item.GetFolder() != nil, "webUrl": deref(item.GetWebUrl())}
 				if item.GetSize() != nil {
 					entry["size"] = *item.GetSize()
 				}
@@ -679,8 +589,7 @@ Examples:
 			headers := []string{"TYPE", "NAME", "SIZE", "LAST MODIFIED"}
 			rows := make([][]string, 0, len(items))
 			for _, item := range items {
-				typeStr := "📄"
-				sizeStr := ""
+				typeStr, sizeStr := "📄", ""
 				if item.GetSize() != nil {
 					sizeStr = humanFileSize(*item.GetSize())
 				}
@@ -702,6 +611,10 @@ Examples:
 	},
 }
 
+// ──────────────────────────────────────────────
+//  sharepoint files get (download)
+// ──────────────────────────────────────────────
+
 var sharepointFilesGetCmd = &cobra.Command{
 	Use:   "get",
 	Short: "Download a file from a SharePoint document library",
@@ -721,8 +634,6 @@ var sharepointFilesGetCmd = &cobra.Command{
 		if outputFlag == "" {
 			return fmt.Errorf("--output is required")
 		}
-
-		// Safety: no overwrite without --force
 		if !forceFlag {
 			if _, statErr := os.Stat(outputFlag); statErr == nil {
 				return fmt.Errorf("output file %q already exists — use --force to overwrite", outputFlag)
@@ -733,13 +644,12 @@ var sharepointFilesGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("getting site drive: %w", err)
+		drive, driveErr := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
+		if driveErr != nil {
+			return fmt.Errorf("getting site drive: %w", driveErr)
 		}
 		driveID := deref(drive.GetId())
 
@@ -756,15 +666,13 @@ var sharepointFilesGetCmd = &cobra.Command{
 		if itemIDFlag != "" {
 			content, err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemIDFlag).Content().Get(ctx, nil)
 		} else {
-			cleanPath := strings.TrimPrefix(pathFlag, "/")
-			itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+			itemByPath := fmt.Sprintf("root:/%s:", strings.TrimPrefix(pathFlag, "/"))
 			content, err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Get(ctx, nil)
 		}
 		if err != nil {
 			return fmt.Errorf("downloading file: %w", err)
 		}
 
-		// Safe write via temp file
 		dir := filepath.Dir(outputFlag)
 		tmpFile, tmpErr := os.CreateTemp(dir, ".cb365-sp-*")
 		if tmpErr != nil {
@@ -789,16 +697,17 @@ var sharepointFilesGetCmd = &cobra.Command{
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(map[string]interface{}{
-				"path": outputFlag,
-				"size": len(content),
-			})
+			return output.JSON(map[string]interface{}{"path": outputFlag, "size": len(content)})
 		default:
 			output.Success(fmt.Sprintf("Downloaded %s (%s)", outputFlag, humanFileSize(int64(len(content)))))
 		}
 		return nil
 	},
 }
+
+// ──────────────────────────────────────────────
+//  sharepoint files upload
+// ──────────────────────────────────────────────
 
 var sharepointFilesUploadCmd = &cobra.Command{
 	Use:   "upload",
@@ -819,7 +728,7 @@ Examples:
 			return fmt.Errorf("--site is required")
 		}
 		if fileFlag == "" {
-			return fmt.Errorf("--file is required (local file path)")
+			return fmt.Errorf("--file is required")
 		}
 		if pathFlag == "" {
 			return fmt.Errorf("--path is required (SharePoint destination path)")
@@ -829,7 +738,6 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("reading local file: %w", err)
 		}
-
 		const maxSimpleUpload = 4 * 1024 * 1024
 		if info.Size() > maxSimpleUpload {
 			return fmt.Errorf("file is %s — simple upload limit is 4MB", humanFileSize(info.Size()))
@@ -842,20 +750,19 @@ Examples:
 		if err != nil {
 			return err
 		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("getting site drive: %w", err)
+		drive, driveErr := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
+		if driveErr != nil {
+			return fmt.Errorf("getting site drive: %w", driveErr)
 		}
 		driveID := deref(drive.GetId())
 
-		// Check if exists (unless --force)
+		cleanPath := strings.TrimPrefix(pathFlag, "/")
+		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+
 		if !forceFlag {
-			cleanPath := strings.TrimPrefix(pathFlag, "/")
-			itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
 			_, existErr := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Get(ctx, nil)
 			if existErr == nil {
 				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
@@ -872,9 +779,6 @@ Examples:
 			return fmt.Errorf("reading file: %w", err)
 		}
 
-		cleanPath := strings.TrimPrefix(pathFlag, "/")
-		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
-
 		uploaded, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Put(ctx, content, nil)
 		if err != nil {
 			return fmt.Errorf("uploading file: %w", err)
@@ -883,12 +787,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(map[string]interface{}{
-				"id":     deref(uploaded.GetId()),
-				"name":   deref(uploaded.GetName()),
-				"webUrl": deref(uploaded.GetWebUrl()),
-				"size":   info.Size(),
-			})
+			return output.JSON(map[string]interface{}{"id": deref(uploaded.GetId()), "name": deref(uploaded.GetName()), "webUrl": deref(uploaded.GetWebUrl()), "size": info.Size()})
 		default:
 			output.Success(fmt.Sprintf("Uploaded %s → %s (%s)", fileFlag, pathFlag, humanFileSize(info.Size())))
 		}
@@ -901,38 +800,31 @@ Examples:
 // ──────────────────────────────────────────────
 
 func init() {
-	// sharepoint sites list
 	sharepointSitesListCmd.Flags().String("search", "", "Search keyword")
 	sharepointSitesCmd.AddCommand(sharepointSitesListCmd)
 
-	// sharepoint sites get
 	sharepointSitesGetCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointSitesCmd.AddCommand(sharepointSitesGetCmd)
 
-	// sharepoint lists list
 	sharepointListsListCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsCmd.AddCommand(sharepointListsListCmd)
 
-	// sharepoint lists items list
 	sharepointListsItemsListCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsListCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsListCmd.Flags().Int("max", 50, "Maximum items to return")
 	sharepointListsItemsCmd.AddCommand(sharepointListsItemsListCmd)
 
-	// sharepoint lists items create
 	sharepointListsItemsCreateCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsCreateCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsCreateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
 	sharepointListsItemsCmd.AddCommand(sharepointListsItemsCreateCmd)
 
-	// sharepoint lists items update
 	sharepointListsItemsUpdateCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().String("item", "", "Item ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
 	sharepointListsItemsCmd.AddCommand(sharepointListsItemsUpdateCmd)
 
-	// sharepoint lists items delete
 	sharepointListsItemsDeleteCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsDeleteCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsDeleteCmd.Flags().String("item", "", "Item ID (required)")
@@ -941,27 +833,23 @@ func init() {
 
 	sharepointListsCmd.AddCommand(sharepointListsItemsCmd)
 
-	// sharepoint files list
 	sharepointFilesListCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointFilesListCmd.Flags().String("path", "", "Folder path in document library")
 	sharepointFilesCmd.AddCommand(sharepointFilesListCmd)
 
-	// sharepoint files get
 	sharepointFilesGetCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointFilesGetCmd.Flags().String("path", "", "File path in document library")
 	sharepointFilesGetCmd.Flags().String("item-id", "", "Drive item ID")
-	sharepointFilesGetCmd.Flags().String("output", "", "Local output file path (required)")
+	sharepointFilesGetCmd.Flags().String("output", "", "Local output path (required)")
 	sharepointFilesGetCmd.Flags().Bool("force", false, "Overwrite existing local file")
 	sharepointFilesCmd.AddCommand(sharepointFilesGetCmd)
 
-	// sharepoint files upload
 	sharepointFilesUploadCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointFilesUploadCmd.Flags().String("file", "", "Local file to upload (required)")
 	sharepointFilesUploadCmd.Flags().String("path", "", "SharePoint destination path (required)")
 	sharepointFilesUploadCmd.Flags().Bool("force", false, "Overwrite existing file")
 	sharepointFilesCmd.AddCommand(sharepointFilesUploadCmd)
 
-	// Wire up
 	sharepointCmd.AddCommand(sharepointSitesCmd)
 	sharepointCmd.AddCommand(sharepointListsCmd)
 	sharepointCmd.AddCommand(sharepointFilesCmd)

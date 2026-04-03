@@ -31,15 +31,55 @@ func TestSharepointAliases(t *testing.T) {
 	}
 }
 
-func TestSharepointListsItemsStructure(t *testing.T) {
-	found := map[string]bool{}
-	for _, sub := range sharepointListsItemsCmd.Commands() {
-		found[sub.Name()] = true
+func TestSharepointSitesGetRequiresSite(t *testing.T) {
+	if sharepointSitesGetCmd.Flags().Lookup("site") == nil {
+		t.Fatal("sharepoint sites get missing --site flag")
 	}
-	for _, expected := range []string{"list", "create", "update", "delete"} {
-		if !found[expected] {
-			t.Errorf("sharepoint lists items missing subcommand %q", expected)
-		}
+}
+
+func TestSharepointListsListRequiresSite(t *testing.T) {
+	if sharepointListsListCmd.Flags().Lookup("site") == nil {
+		t.Fatal("sharepoint lists list missing --site flag")
+	}
+}
+
+func TestSharepointListsItemsListRequiresSiteAndList(t *testing.T) {
+	if sharepointListsItemsListCmd.Flags().Lookup("site") == nil {
+		t.Fatal("missing --site")
+	}
+	if sharepointListsItemsListCmd.Flags().Lookup("list") == nil {
+		t.Fatal("missing --list")
+	}
+}
+
+func TestSharepointListsItemsCreateRequiresFields(t *testing.T) {
+	if sharepointListsItemsCreateCmd.Flags().Lookup("site") == nil {
+		t.Fatal("missing --site")
+	}
+	if sharepointListsItemsCreateCmd.Flags().Lookup("list") == nil {
+		t.Fatal("missing --list")
+	}
+	if sharepointListsItemsCreateCmd.Flags().Lookup("field") == nil {
+		t.Fatal("missing --field")
+	}
+}
+
+func TestSharepointListsItemsUpdateRequiresItem(t *testing.T) {
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("item") == nil {
+		t.Fatal("missing --item")
+	}
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("field") == nil {
+		t.Fatal("missing --field")
+	}
+}
+
+func TestSharepointListsItemsDeleteRequiresForce(t *testing.T) {
+	f := sharepointListsItemsDeleteCmd.Flags().Lookup("force")
+	if f == nil {
+		t.Fatal("missing --force")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--force default should be false, got %s", f.DefValue)
 	}
 }
 
@@ -55,49 +95,42 @@ func TestSharepointFilesStructure(t *testing.T) {
 	}
 }
 
-func TestSharepointItemsDeleteRequiresForce(t *testing.T) {
-	cmd := sharepointListsItemsDeleteCmd
-	if cmd.Flags().Lookup("force") == nil {
-		t.Fatal("sp lists items delete missing --force flag")
+func TestSharepointFilesUploadSafetyFlags(t *testing.T) {
+	if sharepointFilesUploadCmd.Flags().Lookup("force") == nil {
+		t.Fatal("missing --force on upload")
 	}
-	if cmd.Flags().Lookup("force").DefValue != "false" {
-		t.Error("--force default should be false")
+	if sharepointFilesUploadCmd.Flags().Lookup("file") == nil {
+		t.Fatal("missing --file on upload")
 	}
-}
-
-func TestSharepointFilesUploadRequiresForce(t *testing.T) {
-	cmd := sharepointFilesUploadCmd
-	if cmd.Flags().Lookup("force") == nil {
-		t.Fatal("sp files upload missing --force flag")
+	if sharepointFilesUploadCmd.Flags().Lookup("path") == nil {
+		t.Fatal("missing --path on upload")
 	}
 }
 
-func TestSharepointFilesGetRequiresOutput(t *testing.T) {
-	cmd := sharepointFilesGetCmd
-	if cmd.Flags().Lookup("output") == nil {
-		t.Fatal("sp files get missing --output flag")
+func TestSharepointFilesGetSafetyFlags(t *testing.T) {
+	if sharepointFilesGetCmd.Flags().Lookup("output") == nil {
+		t.Fatal("missing --output on get")
+	}
+	if sharepointFilesGetCmd.Flags().Lookup("force") == nil {
+		t.Fatal("missing --force on get")
 	}
 }
 
-func TestSharepointItemsCreateRequiresField(t *testing.T) {
-	cmd := sharepointListsItemsCreateCmd
-	if cmd.Flags().Lookup("field") == nil {
-		t.Fatal("sp lists items create missing --field flag")
+func TestSharepointSitesListSearchFlag(t *testing.T) {
+	if sharepointSitesListCmd.Flags().Lookup("search") == nil {
+		t.Fatal("missing --search")
 	}
 }
 
 func TestFormatSiteURL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
+	tests := []struct{ input, expected string }{
 		{"https://cloverbase.sharepoint.com", "https://cloverbase.sharepoint.com"},
 		{"", "(unknown)"},
 	}
 	for _, tt := range tests {
-		result := formatSiteURL(tt.input)
-		if result != tt.expected {
+		if result := formatSiteURL(tt.input); result != tt.expected {
 			t.Errorf("formatSiteURL(%q) = %q, want %q", tt.input, result, tt.expected)
 		}
 	}
 }
+
