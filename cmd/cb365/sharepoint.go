@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/sites"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
@@ -288,6 +292,11 @@ var sharepointListsListCmd = &cobra.Command{
 
 var sharepointListsItemsCmd = &cobra.Command{
 	Use:   "items",
+	Short: "Manage items in a SharePoint list",
+}
+
+var sharepointListsItemsListCmd = &cobra.Command{
+	Use:   "list",
 	Short: "List items in a SharePoint list",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
@@ -375,6 +384,518 @@ var sharepointListsItemsCmd = &cobra.Command{
 	},
 }
 
+
+// ──────────────────────────────────────────────
+//  sharepoint lists items create
+// ──────────────────────────────────────────────
+
+var sharepointListsItemsCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new item in a SharePoint list",
+	Long: `Create a new item in a SharePoint list with field values.
+
+Fields are specified as key=value pairs via --field flags.
+
+Examples:
+  cb365 sp lists items create --site SITE_ID --list LIST_ID --field Title="New Item" --field Status="Active"
+  cb365 sp lists items create --site SITE_ID --list LIST_ID --field Title="Task" --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		listFlag, _ := cmd.Flags().GetString("list")
+		fieldFlags, _ := cmd.Flags().GetStringSlice("field")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+		if listFlag == "" {
+			return fmt.Errorf("--list is required")
+		}
+		if len(fieldFlags) == 0 {
+			return fmt.Errorf("at least one --field is required (format: Key=Value)")
+		}
+
+		// Parse field key=value pairs
+		fields := make(map[string]interface{})
+		for _, f := range fieldFlags {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid field format %q — use Key=Value", f)
+			}
+			fields[parts[0]] = parts[1]
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would create list item with %d fields in list %s", len(fields), listFlag))
+			return nil
+		}
+
+		item := models.NewListItem()
+		fieldSet := models.NewFieldValueSet()
+		fieldSet.SetAdditionalData(fields)
+		item.SetFields(fieldSet)
+
+		created, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Post(ctx, item, nil)
+		if err != nil {
+			return fmt.Errorf("creating list item: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			result := map[string]interface{}{
+				"id": deref(created.GetId()),
+			}
+			if created.GetFields() != nil {
+				result["fields"] = created.GetFields().GetAdditionalData()
+			}
+			return output.JSON(result)
+		default:
+			output.Success(fmt.Sprintf("Created list item (id: %s)", deref(created.GetId())))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  sharepoint lists items update
+// ──────────────────────────────────────────────
+
+var sharepointListsItemsUpdateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Update fields on a SharePoint list item",
+	Long: `Update field values on an existing SharePoint list item.
+
+Examples:
+  cb365 sp lists items update --site SITE_ID --list LIST_ID --item ITEM_ID --field Status="Complete"
+  cb365 sp lists items update --site SITE_ID --list LIST_ID --item ITEM_ID --field Title="Updated" --field Priority="High"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		listFlag, _ := cmd.Flags().GetString("list")
+		itemFlag, _ := cmd.Flags().GetString("item")
+		fieldFlags, _ := cmd.Flags().GetStringSlice("field")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+		if listFlag == "" {
+			return fmt.Errorf("--list is required")
+		}
+		if itemFlag == "" {
+			return fmt.Errorf("--item is required")
+		}
+		if len(fieldFlags) == 0 {
+			return fmt.Errorf("at least one --field is required (format: Key=Value)")
+		}
+
+		fields := make(map[string]interface{})
+		for _, f := range fieldFlags {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid field format %q — use Key=Value", f)
+			}
+			fields[parts[0]] = parts[1]
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would update item %s with %d fields", itemFlag, len(fields)))
+			return nil
+		}
+
+		fieldSet := models.NewFieldValueSet()
+		fieldSet.SetAdditionalData(fields)
+
+		updated, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Fields().Patch(ctx, fieldSet, nil)
+		if err != nil {
+			return fmt.Errorf("updating list item: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			result := map[string]interface{}{
+				"id":     itemFlag,
+				"fields": updated.GetAdditionalData(),
+			}
+			return output.JSON(result)
+		default:
+			output.Success(fmt.Sprintf("Updated list item %s", itemFlag))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  sharepoint lists items delete
+// ──────────────────────────────────────────────
+
+var sharepointListsItemsDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Delete a SharePoint list item",
+	Long: `Delete an item from a SharePoint list. Requires --force.
+
+Examples:
+  cb365 sp lists items delete --site SITE_ID --list LIST_ID --item ITEM_ID --force`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		listFlag, _ := cmd.Flags().GetString("list")
+		itemFlag, _ := cmd.Flags().GetString("item")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+		if listFlag == "" {
+			return fmt.Errorf("--list is required")
+		}
+		if itemFlag == "" {
+			return fmt.Errorf("--item is required")
+		}
+		if !forceFlag {
+			return fmt.Errorf("deleting list items is destructive — pass --force to confirm")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would delete item %s from list %s", itemFlag, listFlag))
+			return nil
+		}
+
+		err = client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Delete(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("deleting list item: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":      itemFlag,
+				"deleted": true,
+			})
+		default:
+			output.Success(fmt.Sprintf("Deleted list item %s", itemFlag))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  sharepoint files parent + commands
+// ──────────────────────────────────────────────
+
+var sharepointFilesCmd = &cobra.Command{
+	Use:   "files",
+	Short: "Manage files in SharePoint document libraries",
+}
+
+var sharepointFilesListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List files in a site's document library",
+	Long: `List files in a SharePoint site's default document library.
+
+Examples:
+  cb365 sp files list --site SITE_ID
+  cb365 sp files list --site SITE_ID --path "/Shared Documents/Reports"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		pathFlag, _ := cmd.Flags().GetString("path")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Get the site's default drive (document library)
+		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting site drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		parentID := "root"
+		if pathFlag != "" && pathFlag != "/" {
+			cleanPath := strings.TrimPrefix(pathFlag, "/")
+			parentID = fmt.Sprintf("root:/%s:", cleanPath)
+		}
+
+		result, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).Children().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("listing files: %w", err)
+		}
+
+		items := result.GetValue()
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			jsonItems := make([]map[string]interface{}, 0, len(items))
+			for _, item := range items {
+				entry := map[string]interface{}{
+					"id":       deref(item.GetId()),
+					"name":     deref(item.GetName()),
+					"isFolder": item.GetFolder() != nil,
+					"webUrl":   deref(item.GetWebUrl()),
+				}
+				if item.GetSize() != nil {
+					entry["size"] = *item.GetSize()
+				}
+				if item.GetLastModifiedDateTime() != nil {
+					entry["lastModified"] = item.GetLastModifiedDateTime().Format(time.RFC3339)
+				}
+				jsonItems = append(jsonItems, entry)
+			}
+			return output.JSON(jsonItems)
+		default:
+			headers := []string{"TYPE", "NAME", "SIZE", "LAST MODIFIED"}
+			rows := make([][]string, 0, len(items))
+			for _, item := range items {
+				typeStr := "📄"
+				sizeStr := ""
+				if item.GetSize() != nil {
+					sizeStr = humanFileSize(*item.GetSize())
+				}
+				if item.GetFolder() != nil {
+					typeStr = "📁"
+					if item.GetFolder().GetChildCount() != nil {
+						sizeStr = fmt.Sprintf("%d items", *item.GetFolder().GetChildCount())
+					}
+				}
+				lastMod := ""
+				if item.GetLastModifiedDateTime() != nil {
+					lastMod = item.GetLastModifiedDateTime().Format("2006-01-02 15:04")
+				}
+				rows = append(rows, []string{typeStr, deref(item.GetName()), sizeStr, lastMod})
+			}
+			output.Table(headers, rows)
+		}
+		return nil
+	},
+}
+
+var sharepointFilesGetCmd = &cobra.Command{
+	Use:   "get",
+	Short: "Download a file from a SharePoint document library",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		pathFlag, _ := cmd.Flags().GetString("path")
+		itemIDFlag, _ := cmd.Flags().GetString("item-id")
+		outputFlag, _ := cmd.Flags().GetString("output")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+		if pathFlag == "" && itemIDFlag == "" {
+			return fmt.Errorf("--path or --item-id is required")
+		}
+		if outputFlag == "" {
+			return fmt.Errorf("--output is required")
+		}
+
+		// Safety: no overwrite without --force
+		if !forceFlag {
+			if _, statErr := os.Stat(outputFlag); statErr == nil {
+				return fmt.Errorf("output file %q already exists — use --force to overwrite", outputFlag)
+			}
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting site drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		if flagDryRun {
+			target := pathFlag
+			if target == "" {
+				target = itemIDFlag
+			}
+			output.Info(fmt.Sprintf("[DRY RUN] Would download %s → %s", target, outputFlag))
+			return nil
+		}
+
+		var content []byte
+		if itemIDFlag != "" {
+			content, err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemIDFlag).Content().Get(ctx, nil)
+		} else {
+			cleanPath := strings.TrimPrefix(pathFlag, "/")
+			itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+			content, err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Get(ctx, nil)
+		}
+		if err != nil {
+			return fmt.Errorf("downloading file: %w", err)
+		}
+
+		// Safe write via temp file
+		dir := filepath.Dir(outputFlag)
+		tmpFile, tmpErr := os.CreateTemp(dir, ".cb365-sp-*")
+		if tmpErr != nil {
+			return fmt.Errorf("creating temp file: %w", tmpErr)
+		}
+		tmpPath := tmpFile.Name()
+		_, writeErr := tmpFile.Write(content)
+		closeErr := tmpFile.Close()
+		if writeErr != nil {
+			os.Remove(tmpPath) // #nosec G104
+			return fmt.Errorf("writing file: %w", writeErr)
+		}
+		if closeErr != nil {
+			os.Remove(tmpPath) // #nosec G104
+			return fmt.Errorf("closing temp file: %w", closeErr)
+		}
+		if err := os.Rename(tmpPath, outputFlag); err != nil {
+			os.Remove(tmpPath) // #nosec G104
+			return fmt.Errorf("moving temp file: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"path": outputFlag,
+				"size": len(content),
+			})
+		default:
+			output.Success(fmt.Sprintf("Downloaded %s (%s)", outputFlag, humanFileSize(int64(len(content)))))
+		}
+		return nil
+	},
+}
+
+var sharepointFilesUploadCmd = &cobra.Command{
+	Use:   "upload",
+	Short: "Upload a file to a SharePoint document library",
+	Long: `Upload a local file to a SharePoint site's document library.
+
+Safety: 4MB simple upload limit. --force required to overwrite.
+
+Examples:
+  cb365 sp files upload --site SITE_ID --file ./report.pdf --path "/Shared Documents/report.pdf"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		siteFlag, _ := cmd.Flags().GetString("site")
+		fileFlag, _ := cmd.Flags().GetString("file")
+		pathFlag, _ := cmd.Flags().GetString("path")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if siteFlag == "" {
+			return fmt.Errorf("--site is required")
+		}
+		if fileFlag == "" {
+			return fmt.Errorf("--file is required (local file path)")
+		}
+		if pathFlag == "" {
+			return fmt.Errorf("--path is required (SharePoint destination path)")
+		}
+
+		info, err := os.Stat(fileFlag)
+		if err != nil {
+			return fmt.Errorf("reading local file: %w", err)
+		}
+
+		const maxSimpleUpload = 4 * 1024 * 1024
+		if info.Size() > maxSimpleUpload {
+			return fmt.Errorf("file is %s — simple upload limit is 4MB", humanFileSize(info.Size()))
+		}
+		if info.Size() == 0 {
+			return fmt.Errorf("file is empty — refusing to upload a 0-byte file")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		drive, err := client.Sites().BySiteId(siteFlag).Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting site drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		// Check if exists (unless --force)
+		if !forceFlag {
+			cleanPath := strings.TrimPrefix(pathFlag, "/")
+			itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+			_, existErr := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Get(ctx, nil)
+			if existErr == nil {
+				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
+			}
+		}
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would upload %s (%s) → %s", fileFlag, humanFileSize(info.Size()), pathFlag))
+			return nil
+		}
+
+		content, err := os.ReadFile(fileFlag) // #nosec G304
+		if err != nil {
+			return fmt.Errorf("reading file: %w", err)
+		}
+
+		cleanPath := strings.TrimPrefix(pathFlag, "/")
+		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
+
+		uploaded, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Put(ctx, content, nil)
+		if err != nil {
+			return fmt.Errorf("uploading file: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":     deref(uploaded.GetId()),
+				"name":   deref(uploaded.GetName()),
+				"webUrl": deref(uploaded.GetWebUrl()),
+				"size":   info.Size(),
+			})
+		default:
+			output.Success(fmt.Sprintf("Uploaded %s → %s (%s)", fileFlag, pathFlag, humanFileSize(info.Size())))
+		}
+		return nil
+	},
+}
+
 // ──────────────────────────────────────────────
 //  Registration
 // ──────────────────────────────────────────────
@@ -392,14 +913,57 @@ func init() {
 	sharepointListsListCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsCmd.AddCommand(sharepointListsListCmd)
 
-	// sharepoint lists items
-	sharepointListsItemsCmd.Flags().String("site", "", "Site ID (required)")
-	sharepointListsItemsCmd.Flags().String("list", "", "List ID (required)")
-	sharepointListsItemsCmd.Flags().Int("max", 50, "Maximum items to return")
+	// sharepoint lists items list
+	sharepointListsItemsListCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointListsItemsListCmd.Flags().String("list", "", "List ID (required)")
+	sharepointListsItemsListCmd.Flags().Int("max", 50, "Maximum items to return")
+	sharepointListsItemsCmd.AddCommand(sharepointListsItemsListCmd)
+
+	// sharepoint lists items create
+	sharepointListsItemsCreateCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointListsItemsCreateCmd.Flags().String("list", "", "List ID (required)")
+	sharepointListsItemsCreateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
+	sharepointListsItemsCmd.AddCommand(sharepointListsItemsCreateCmd)
+
+	// sharepoint lists items update
+	sharepointListsItemsUpdateCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointListsItemsUpdateCmd.Flags().String("list", "", "List ID (required)")
+	sharepointListsItemsUpdateCmd.Flags().String("item", "", "Item ID (required)")
+	sharepointListsItemsUpdateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
+	sharepointListsItemsCmd.AddCommand(sharepointListsItemsUpdateCmd)
+
+	// sharepoint lists items delete
+	sharepointListsItemsDeleteCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointListsItemsDeleteCmd.Flags().String("list", "", "List ID (required)")
+	sharepointListsItemsDeleteCmd.Flags().String("item", "", "Item ID (required)")
+	sharepointListsItemsDeleteCmd.Flags().Bool("force", false, "Confirm deletion (required)")
+	sharepointListsItemsCmd.AddCommand(sharepointListsItemsDeleteCmd)
+
 	sharepointListsCmd.AddCommand(sharepointListsItemsCmd)
+
+	// sharepoint files list
+	sharepointFilesListCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointFilesListCmd.Flags().String("path", "", "Folder path in document library")
+	sharepointFilesCmd.AddCommand(sharepointFilesListCmd)
+
+	// sharepoint files get
+	sharepointFilesGetCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointFilesGetCmd.Flags().String("path", "", "File path in document library")
+	sharepointFilesGetCmd.Flags().String("item-id", "", "Drive item ID")
+	sharepointFilesGetCmd.Flags().String("output", "", "Local output file path (required)")
+	sharepointFilesGetCmd.Flags().Bool("force", false, "Overwrite existing local file")
+	sharepointFilesCmd.AddCommand(sharepointFilesGetCmd)
+
+	// sharepoint files upload
+	sharepointFilesUploadCmd.Flags().String("site", "", "Site ID (required)")
+	sharepointFilesUploadCmd.Flags().String("file", "", "Local file to upload (required)")
+	sharepointFilesUploadCmd.Flags().String("path", "", "SharePoint destination path (required)")
+	sharepointFilesUploadCmd.Flags().Bool("force", false, "Overwrite existing file")
+	sharepointFilesCmd.AddCommand(sharepointFilesUploadCmd)
 
 	// Wire up
 	sharepointCmd.AddCommand(sharepointSitesCmd)
 	sharepointCmd.AddCommand(sharepointListsCmd)
+	sharepointCmd.AddCommand(sharepointFilesCmd)
 }
 

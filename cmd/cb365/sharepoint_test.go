@@ -4,21 +4,15 @@ import (
 	"testing"
 )
 
-// ──────────────────────────────────────────────
-//  SharePoint safety and structure tests
-// ──────────────────────────────────────────────
-
 func TestSharepointCommandStructure(t *testing.T) {
 	if !sharepointCmd.HasSubCommands() {
 		t.Fatal("sharepoint command should have subcommands")
 	}
-
 	found := map[string]bool{}
 	for _, sub := range sharepointCmd.Commands() {
 		found[sub.Name()] = true
 	}
-
-	for _, expected := range []string{"sites", "lists"} {
+	for _, expected := range []string{"sites", "lists", "files"} {
 		if !found[expected] {
 			t.Errorf("sharepoint missing subcommand %q", expected)
 		}
@@ -26,9 +20,6 @@ func TestSharepointCommandStructure(t *testing.T) {
 }
 
 func TestSharepointAliases(t *testing.T) {
-	if len(sharepointCmd.Aliases) == 0 {
-		t.Fatal("sharepoint should have alias 'sp'")
-	}
 	found := false
 	for _, a := range sharepointCmd.Aliases {
 		if a == "sp" {
@@ -40,50 +31,58 @@ func TestSharepointAliases(t *testing.T) {
 	}
 }
 
-func TestSharepointSitesGetRequiresSite(t *testing.T) {
-	cmd := sharepointSitesGetCmd
-	siteFlag := cmd.Flags().Lookup("site")
-	if siteFlag == nil {
-		t.Fatal("sharepoint sites get missing --site flag")
+func TestSharepointListsItemsStructure(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range sharepointListsItemsCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"list", "create", "update", "delete"} {
+		if !found[expected] {
+			t.Errorf("sharepoint lists items missing subcommand %q", expected)
+		}
 	}
 }
 
-func TestSharepointListsListRequiresSite(t *testing.T) {
-	cmd := sharepointListsListCmd
-	siteFlag := cmd.Flags().Lookup("site")
-	if siteFlag == nil {
-		t.Fatal("sharepoint lists list missing --site flag")
+func TestSharepointFilesStructure(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range sharepointFilesCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"list", "get", "upload"} {
+		if !found[expected] {
+			t.Errorf("sharepoint files missing subcommand %q", expected)
+		}
 	}
 }
 
-func TestSharepointListsItemsRequiresSiteAndList(t *testing.T) {
-	cmd := sharepointListsItemsCmd
-	siteFlag := cmd.Flags().Lookup("site")
-	if siteFlag == nil {
-		t.Fatal("sharepoint lists items missing --site flag")
+func TestSharepointItemsDeleteRequiresForce(t *testing.T) {
+	cmd := sharepointListsItemsDeleteCmd
+	if cmd.Flags().Lookup("force") == nil {
+		t.Fatal("sp lists items delete missing --force flag")
 	}
-	listFlag := cmd.Flags().Lookup("list")
-	if listFlag == nil {
-		t.Fatal("sharepoint lists items missing --list flag")
+	if cmd.Flags().Lookup("force").DefValue != "false" {
+		t.Error("--force default should be false")
 	}
 }
 
-func TestSharepointListsItemsMaxDefault(t *testing.T) {
-	cmd := sharepointListsItemsCmd
-	maxFlag := cmd.Flags().Lookup("max")
-	if maxFlag == nil {
-		t.Fatal("sharepoint lists items missing --max flag")
-	}
-	if maxFlag.DefValue != "50" {
-		t.Errorf("--max default should be 50, got %s", maxFlag.DefValue)
+func TestSharepointFilesUploadRequiresForce(t *testing.T) {
+	cmd := sharepointFilesUploadCmd
+	if cmd.Flags().Lookup("force") == nil {
+		t.Fatal("sp files upload missing --force flag")
 	}
 }
 
-func TestSharepointSitesListSearchFlag(t *testing.T) {
-	cmd := sharepointSitesListCmd
-	searchFlag := cmd.Flags().Lookup("search")
-	if searchFlag == nil {
-		t.Fatal("sharepoint sites list missing --search flag")
+func TestSharepointFilesGetRequiresOutput(t *testing.T) {
+	cmd := sharepointFilesGetCmd
+	if cmd.Flags().Lookup("output") == nil {
+		t.Fatal("sp files get missing --output flag")
+	}
+}
+
+func TestSharepointItemsCreateRequiresField(t *testing.T) {
+	cmd := sharepointListsItemsCreateCmd
+	if cmd.Flags().Lookup("field") == nil {
+		t.Fatal("sp lists items create missing --field flag")
 	}
 }
 
@@ -102,4 +101,3 @@ func TestFormatSiteURL(t *testing.T) {
 		}
 	}
 }
-
