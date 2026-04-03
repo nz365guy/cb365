@@ -102,6 +102,11 @@ var contactsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List contacts",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Safety: warn on large exports
+		if contactsListMax > 100 {
+			output.Info(fmt.Sprintf("Warning: requesting %d contacts — large exports should be reviewed before sharing externally", contactsListMax))
+		}
+
 		client, err := newGraphClient()
 		if err != nil {
 			return err
@@ -173,7 +178,10 @@ var contactsListCmd = &cobra.Command{
 //  CONTACTS GET
 // ══════════════════════════════════════════════
 
-var contactsGetID string
+var (
+	contactsGetID             string
+	contactsGetIncludePrivate bool
+)
 
 var contactsGetCmd = &cobra.Command{
 	Use:   "get",
@@ -201,8 +209,28 @@ var contactsGetCmd = &cobra.Command{
 		switch format {
 		case output.FormatJSON:
 			item := formatContactJSON(c)
-			if c.GetPersonalNotes() != nil {
-				item["personal_notes"] = deref(c.GetPersonalNotes())
+			if contactsGetIncludePrivate {
+				// Private fields: only included with --include-private
+				if c.GetPersonalNotes() != nil {
+					item["personal_notes"] = deref(c.GetPersonalNotes())
+				}
+				if c.GetHomeAddress() != nil {
+					addr := c.GetHomeAddress()
+					item["home_address"] = map[string]string{
+						"street":      deref(addr.GetStreet()),
+						"city":        deref(addr.GetCity()),
+						"state":       deref(addr.GetState()),
+						"country":     deref(addr.GetCountryOrRegion()),
+						"postal_code": deref(addr.GetPostalCode()),
+					}
+				}
+				if len(c.GetHomePhones()) > 0 {
+					item["home_phones"] = c.GetHomePhones()
+				}
+			} else {
+				if c.GetPersonalNotes() != nil {
+					item["personal_notes"] = "[REDACTED — use --include-private]"
+				}
 			}
 			if c.GetBusinessAddress() != nil {
 				addr := c.GetBusinessAddress()
@@ -345,6 +373,7 @@ func init() {
 
 	// contacts get
 	contactsGetCmd.Flags().StringVar(&contactsGetID, "id", "", "Contact ID")
+	contactsGetCmd.Flags().BoolVar(&contactsGetIncludePrivate, "include-private", false, "Include private fields (notes, home address, home phone)")
 
 	// contacts search
 	contactsSearchCmd.Flags().StringVar(&contactsSearchQuery, "query", "", "Search query (name or email)")
@@ -355,4 +384,5 @@ func init() {
 	contactsCmd.AddCommand(contactsGetCmd)
 	contactsCmd.AddCommand(contactsSearchCmd)
 }
+
 
