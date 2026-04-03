@@ -88,21 +88,9 @@ var authLoginCmd = &cobra.Command{
 		var clientSecretToStore string
 
 		if mode == config.AuthModeAppOnly {
-			// App-only: client credentials flow
-			if loginClientSecret == "" {
-				// Try reading from stdin (for piped input)
-				output.Info("Reading client secret from stdin...")
-				var secret []byte
-				secret = make([]byte, 1024)
-				n, readErr := cmd.InOrStdin().Read(secret)
-				if readErr != nil || n == 0 {
-					return fmt.Errorf("--client-secret is required for app-only mode")
-				}
-				loginClientSecret = strings.TrimSpace(string(secret[:n]))
-			}
-
+			// App-only: certificate auth OR client credentials
 			if loginCertificate != "" {
-				// Certificate-based app-only auth
+				// Certificate-based app-only auth (no client secret needed)
 				output.Info(fmt.Sprintf("Authenticating profile %q via certificate...", profileName))
 
 				certToken, certErr := auth.LoginCertificate(ctx, profile, loginCertificate, ipv4Only)
@@ -113,17 +101,29 @@ var authLoginCmd = &cobra.Command{
 				expiresOn = certToken.ExpiresOn
 				profile.Username = "(app-only/certificate)"
 			} else {
+				// Client credentials flow — secret required
+				if loginClientSecret == "" {
+					// Try reading from stdin (for piped input)
+					output.Info("Reading client secret from stdin...")
+					var secret []byte
+					secret = make([]byte, 1024)
+					n, readErr := cmd.InOrStdin().Read(secret)
+					if readErr != nil || n == 0 {
+						return fmt.Errorf("--client-secret or --certificate is required for app-only mode")
+					}
+					loginClientSecret = strings.TrimSpace(string(secret[:n]))
+				}
+
 				output.Info(fmt.Sprintf("Authenticating profile %q via client credentials...", profileName))
 
 				token, err := auth.LoginAppOnly(ctx, profile, loginClientSecret, ipv4Only)
-			if err != nil {
-				return fmt.Errorf("authentication failed: %w", err)
-			}
-			tokenStr = token.Token
-			expiresOn = token.ExpiresOn
-			clientSecretToStore = loginClientSecret
+				if err != nil {
+					return fmt.Errorf("authentication failed: %w", err)
+				}
+				tokenStr = token.Token
+				expiresOn = token.ExpiresOn
+				clientSecretToStore = loginClientSecret
 
-				// App-only tokens don't have UPN
 				profile.Username = "(app-only)"
 			}
 		} else {
