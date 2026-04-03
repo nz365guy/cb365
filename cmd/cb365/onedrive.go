@@ -9,6 +9,7 @@ import (
 	"time"
 
 	drivesPkg "github.com/microsoftgraph/msgraph-sdk-go/drives"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -451,6 +452,167 @@ Examples:
 	},
 }
 
+
+// ──────────────────────────────────────────────
+//  onedrive delete (move to recycle bin)
+// ──────────────────────────────────────────────
+
+var onedriveDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Move a file or folder to the OneDrive recycle bin",
+	Long: `Move a file or folder to the OneDrive recycle bin.
+
+Safety: This does NOT permanently delete. Items go to the recycle bin
+and can be recovered. Requires --force to confirm.
+Permanent deletion of active files is never permitted.
+
+Examples:
+  cb365 onedrive delete --path "/Documents/old-report.pdf" --force
+  cb365 onedrive delete --item-id ABC123 --force`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pathFlag, _ := cmd.Flags().GetString("path")
+		itemIDFlag, _ := cmd.Flags().GetString("item-id")
+		forceFlag, _ := cmd.Flags().GetBool("force")
+
+		if pathFlag == "" && itemIDFlag == "" {
+			return fmt.Errorf("--path or --item-id is required")
+		}
+		if !forceFlag {
+			return fmt.Errorf("moving to recycle bin is destructive — pass --force to confirm")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		drive, err := client.Me().Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting user drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		target := pathFlag
+		if target == "" {
+			target = itemIDFlag
+		}
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would move %s to recycle bin", target))
+			return nil
+		}
+
+		var itemID string
+		if itemIDFlag != "" {
+			itemID = itemIDFlag
+		} else {
+			cleanPath := strings.TrimPrefix(pathFlag, "/")
+			itemID = fmt.Sprintf("root:/%s:", cleanPath)
+		}
+
+		err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemID).Delete(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("moving to recycle bin: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"path":    target,
+				"deleted": true,
+				"note":    "Moved to recycle bin — not permanently deleted",
+			})
+		default:
+			output.Success(fmt.Sprintf("Moved %s to recycle bin", target))
+		}
+		return nil
+	},
+}
+
+// ──────────────────────────────────────────────
+//  onedrive mkdir
+// ──────────────────────────────────────────────
+
+var onedriveMkdirCmd = &cobra.Command{
+	Use:   "mkdir",
+	Short: "Create a folder in OneDrive",
+	Long: `Create a new folder in OneDrive.
+
+Examples:
+  cb365 onedrive mkdir --path "/Documents/Reports"
+  cb365 onedrive mkdir --path "/Projects/2026" --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pathFlag, _ := cmd.Flags().GetString("path")
+
+		if pathFlag == "" {
+			return fmt.Errorf("--path is required")
+		}
+
+		client, err := newGraphClient()
+		if err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		drive, err := client.Me().Drive().Get(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("getting user drive: %w", err)
+		}
+		driveID := deref(drive.GetId())
+
+		if flagDryRun {
+			output.Info(fmt.Sprintf("[DRY RUN] Would create folder %s", pathFlag))
+			return nil
+		}
+
+		// Split path into parent and folder name
+		cleanPath := strings.TrimPrefix(pathFlag, "/")
+		parts := strings.Split(cleanPath, "/")
+		folderName := parts[len(parts)-1]
+
+		parentID := "root"
+		if len(parts) > 1 {
+			parentPath := strings.Join(parts[:len(parts)-1], "/")
+			parentID = fmt.Sprintf("root:/%s:", parentPath)
+		}
+
+		newFolder := models.NewDriveItem()
+		newFolder.SetName(&folderName)
+		folder := models.NewFolder()
+		newFolder.SetFolder(folder)
+		// Conflict behaviour: fail if exists
+		conflictBehavior := "fail"
+		additionalData := map[string]interface{}{
+			"@microsoft.graph.conflictBehavior": conflictBehavior,
+		}
+		newFolder.SetAdditionalData(additionalData)
+
+		created, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).Children().Post(ctx, newFolder, nil)
+		if err != nil {
+			return fmt.Errorf("creating folder: %w", err)
+		}
+
+		format := output.Resolve(flagJSON, flagPlain)
+		switch format {
+		case output.FormatJSON:
+			return output.JSON(map[string]interface{}{
+				"id":     deref(created.GetId()),
+				"name":   deref(created.GetName()),
+				"webUrl": deref(created.GetWebUrl()),
+			})
+		default:
+			output.Success(fmt.Sprintf("Created folder %s (id: %s)", pathFlag, deref(created.GetId())))
+		}
+		return nil
+	},
+}
+
 // ──────────────────────────────────────────────
 //  Registration
 // ──────────────────────────────────────────────
@@ -473,5 +635,15 @@ func init() {
 	onedriveUploadCmd.Flags().String("path", "", "OneDrive destination path (required)")
 	onedriveUploadCmd.Flags().Bool("force", false, "Overwrite existing OneDrive file")
 	onedriveCmd.AddCommand(onedriveUploadCmd)
+
+	// onedrive delete
+	onedriveDeleteCmd.Flags().String("path", "", "OneDrive file/folder path")
+	onedriveDeleteCmd.Flags().String("item-id", "", "Drive item ID")
+	onedriveDeleteCmd.Flags().Bool("force", false, "Confirm move to recycle bin (required)")
+	onedriveCmd.AddCommand(onedriveDeleteCmd)
+
+	// onedrive mkdir
+	onedriveMkdirCmd.Flags().String("path", "", "Folder path to create (required)")
+	onedriveCmd.AddCommand(onedriveMkdirCmd)
 }
 

@@ -115,3 +115,34 @@ func TestOnedriveLsPathAndItemIDFlags(t *testing.T) {
 	}
 }
 
+
+func TestOnedriveDeleteRequiresForce(t *testing.T) {
+	cmd := onedriveDeleteCmd
+	forceFlag := cmd.Flags().Lookup("force")
+	if forceFlag == nil {
+		t.Fatal("onedrive delete missing --force flag")
+	}
+	if forceFlag.DefValue != "false" {
+		t.Errorf("--force default should be false, got %s", forceFlag.DefValue)
+	}
+}
+
+func TestOnedriveMkdirRequiresPath(t *testing.T) {
+	cmd := onedriveMkdirCmd
+	pathFlag := cmd.Flags().Lookup("path")
+	if pathFlag == nil {
+		t.Fatal("onedrive mkdir missing --path flag")
+	}
+}
+
+func TestOnedriveCommandStructureWithNewCmds(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range onedriveCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"ls", "get", "upload", "delete", "mkdir"} {
+		if !found[expected] {
+			t.Errorf("onedrive missing subcommand %q", expected)
+		}
+	}
+}
