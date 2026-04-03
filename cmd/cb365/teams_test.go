@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -97,3 +98,12 @@ func TestTeamsCommandStructure(t *testing.T) {
 	}
 }
 
+
+func TestTeamsAuditFooterExists(t *testing.T) {
+	if teamsAuditFooter == "" {
+		t.Fatal("teamsAuditFooter must not be empty")
+	}
+	if !strings.Contains(teamsAuditFooter, "cb365") {
+		t.Error("teamsAuditFooter must contain 'cb365' identifier")
+	}
+}

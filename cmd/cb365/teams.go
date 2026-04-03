@@ -16,6 +16,15 @@ import (
 )
 
 // ──────────────────────────────────────────────
+//  Teams constants
+// ──────────────────────────────────────────────
+
+// teamsAuditFooter is appended to every agent-generated message.
+// Ensures an observable audit trail differentiating autonomous
+// communication from human interaction.
+const teamsAuditFooter = "\n\n[Sent via cb365]"
+
+// ──────────────────────────────────────────────
 //  Teams helpers
 // ──────────────────────────────────────────────
 
@@ -203,16 +212,25 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 			return err
 		}
 
+		// Safety: warn if channel has >10 members (large audience guard)
+		members, membErr := client.Teams().ByTeamId(teamID).Members().Get(ctx, nil)
+		if membErr == nil && members.GetValue() != nil && len(members.GetValue()) > 10 {
+			output.Info(fmt.Sprintf("⚠ Team %q has %d members — this message will be visible to all of them", teamName, len(members.GetValue())))
+		}
+
 		if flagDryRun {
 			output.Info(fmt.Sprintf("[DRY RUN] Would send message to #%s in %s (%d chars)", channelName, teamName, len(bodyFlag)))
 			return nil
 		}
 
+		// Audit & Identity: tag all agent-generated messages with disclaimer
+		taggedBody := bodyFlag + teamsAuditFooter
+
 		msg := models.NewChatMessage()
 		body := models.NewItemBody()
 		contentType := models.TEXT_BODYTYPE
 		body.SetContentType(&contentType)
-		body.SetContent(&bodyFlag)
+		body.SetContent(&taggedBody)
 		msg.SetBody(body)
 
 		// Build request config with empty options to avoid nil pointer
@@ -355,11 +373,14 @@ var teamsChatSendCmd = &cobra.Command{
 			return nil
 		}
 
+		// Audit & Identity: tag all agent-generated messages with disclaimer
+		taggedBody := bodyFlag + teamsAuditFooter
+
 		msg := models.NewChatMessage()
 		body := models.NewItemBody()
 		contentType := models.TEXT_BODYTYPE
 		body.SetContentType(&contentType)
-		body.SetContent(&bodyFlag)
+		body.SetContent(&taggedBody)
 		msg.SetBody(body)
 
 		config := &chatsPkg.ItemMessagesRequestBuilderPostRequestConfiguration{}
