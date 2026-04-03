@@ -35,6 +35,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(todoCmd)
 	rootCmd.AddCommand(mailCmd)
+	rootCmd.AddCommand(calendarCmd)
 }
 
 var versionCmd = &cobra.Command{
