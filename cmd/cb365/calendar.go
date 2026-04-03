@@ -13,13 +13,22 @@ import (
 )
 
 // ──────────────────────────────────────────────
-//  Calendar helpers
+//  Calendar safety helpers
 // ──────────────────────────────────────────────
 
+// nzNow returns the current time in Pacific/Auckland.
+// All past-event checks MUST use this, not time.Now().
+func nzNow() time.Time {
+	loc, err := time.LoadLocation("Pacific/Auckland")
+	if err != nil {
+		return time.Now() // fallback to system time
+	}
+	return time.Now().In(loc)
+}
+
 // parseRFC3339Strict parses a datetime string and rejects bare datetimes without timezone.
-// Safety rule #1: all datetimes MUST include a timezone offset.
+// Safety rule: all datetimes MUST include a timezone offset.
 func parseRFC3339Strict(s string) (time.Time, error) {
-	// Reject bare datetimes like "2026-04-10T09:00:00" (no offset)
 	if !strings.Contains(s, "Z") && !strings.Contains(s, "+") && !strings.ContainsAny(s[len(s)-6:], "+-") {
 		return time.Time{}, fmt.Errorf("datetime %q missing timezone offset — use full RFC3339 format (e.g. 2026-04-10T09:00:00+12:00)", s)
 	}
@@ -30,15 +39,100 @@ func parseRFC3339Strict(s string) (time.Time, error) {
 	return t, nil
 }
 
-// rejectPastEvent enforces safety rule #2: no modifications to past events.
+// rejectPastEvent enforces: no modifications to past events (Pacific/Auckland).
 func rejectPastEvent(startTime time.Time, action string) error {
-	if startTime.Before(time.Now()) {
+	if startTime.Before(nzNow()) {
 		return fmt.Errorf("cannot %s event starting at %s — it is in the past (past events are historical records)", action, startTime.Format(time.RFC3339))
 	}
 	return nil
 }
 
-// formatEventJSON builds a JSON-serialisable map from an Event.
+// parseEventStartTime extracts the start time from a Graph event as a time.Time.
+func parseEventStartTime(evt models.Eventable) (time.Time, bool) {
+	if evt.GetStart() == nil {
+		return time.Time{}, false
+	}
+	dt := deref(evt.GetStart().GetDateTime())
+	tz := deref(evt.GetStart().GetTimeZone())
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	t, err := time.ParseInLocation("2006-01-02T15:04:05.0000000", dt, loc)
+	if err != nil {
+		t, err = time.ParseInLocation("2006-01-02T15:04:05", dt, loc)
+	}
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// parseEventEndTime extracts the end time from a Graph event as a time.Time.
+func parseEventEndTime(evt models.Eventable) (time.Time, bool) {
+	if evt.GetEnd() == nil {
+		return time.Time{}, false
+	}
+	dt := deref(evt.GetEnd().GetDateTime())
+	tz := deref(evt.GetEnd().GetTimeZone())
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	t, err := time.ParseInLocation("2006-01-02T15:04:05.0000000", dt, loc)
+	if err != nil {
+		t, err = time.ParseInLocation("2006-01-02T15:04:05", dt, loc)
+	}
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// isSeriesMaster returns true if the event is a recurring series master (not an instance).
+func isSeriesMaster(evt models.Eventable) bool {
+	return evt.GetRecurrence() != nil && evt.GetSeriesMasterId() == nil
+}
+
+// isPrivateEvent returns true if the event's sensitivity is "private".
+func isPrivateEvent(evt models.Eventable) bool {
+	if evt.GetSensitivity() == nil {
+		return false
+	}
+	return evt.GetSensitivity().String() == "private"
+}
+
+// isOOFOrBusy returns true if the event is marked as Out of Office or Busy.
+func isOOFOrBusy(evt models.Eventable) bool {
+	if evt.GetShowAs() == nil {
+		return false
+	}
+	s := evt.GetShowAs().String()
+	return s == "oof" || s == "busy"
+}
+
+// isOrganizer returns true if the current user is the event organizer.
+func isOrganizer(evt models.Eventable) bool {
+	if evt.GetIsOrganizer() == nil {
+		return true // default to true if unknown
+	}
+	return *evt.GetIsOrganizer()
+}
+
+// attendeeCount returns the number of attendees on the event.
+func attendeeCount(evt models.Eventable) int {
+	return len(evt.GetAttendees())
+}
+
+// hasTimeOverlap checks if [newStart, newEnd) overlaps with [existStart, existEnd).
+func hasTimeOverlap(newStart, newEnd, existStart, existEnd time.Time) bool {
+	return newStart.Before(existEnd) && newEnd.After(existStart)
+}
+
+// ──────────────────────────────────────────────
+//  Calendar JSON formatter
+// ──────────────────────────────────────────────
+
 func formatEventJSON(evt models.Eventable) map[string]interface{} {
 	item := map[string]interface{}{
 		"id":      deref(evt.GetId()),
@@ -98,6 +192,12 @@ func formatEventJSON(evt models.Eventable) map[string]interface{} {
 	if evt.GetShowAs() != nil {
 		item["show_as"] = evt.GetShowAs().String()
 	}
+	if evt.GetIsOrganizer() != nil {
+		item["is_organizer"] = *evt.GetIsOrganizer()
+	}
+	if evt.GetSensitivity() != nil {
+		item["sensitivity"] = evt.GetSensitivity().String()
+	}
 	if evt.GetSeriesMasterId() != nil {
 		item["series_master_id"] = deref(evt.GetSeriesMasterId())
 	}
@@ -109,20 +209,18 @@ func formatEventJSON(evt models.Eventable) map[string]interface{} {
 	return item
 }
 
-// eventTimeString formats event start/end for human display.
 func eventTimeString(dtz models.DateTimeTimeZoneable) string {
 	if dtz == nil {
 		return ""
 	}
 	dt := deref(dtz.GetDateTime())
 	tz := deref(dtz.GetTimeZone())
-	// Try to parse and format nicely
 	t, err := time.Parse("2006-01-02T15:04:05.0000000", dt)
 	if err != nil {
 		t, err = time.Parse("2006-01-02T15:04:05", dt)
 	}
 	if err != nil {
-		return dt // fallback to raw
+		return dt
 	}
 	if tz == "Pacific/Auckland" || tz == "New Zealand Standard Time" {
 		return t.Format("2 Jan 3:04pm")
@@ -168,7 +266,7 @@ var calListCmd = &cobra.Command{
 			QueryParameters: &users.ItemCalendarViewRequestBuilderGetQueryParameters{
 				StartDateTime: &calListFrom,
 				EndDateTime:   &calListTo,
-				Select:        []string{"id", "subject", "start", "end", "organizer", "attendees", "location", "isOnlineMeeting", "onlineMeetingUrl", "isAllDay", "isCancelled", "showAs", "seriesMasterId", "recurrence", "bodyPreview"},
+				Select:        []string{"id", "subject", "start", "end", "organizer", "attendees", "location", "isOnlineMeeting", "onlineMeetingUrl", "isAllDay", "isCancelled", "showAs", "sensitivity", "isOrganizer", "seriesMasterId", "recurrence", "bodyPreview"},
 			},
 		}
 
@@ -208,12 +306,6 @@ var calListCmd = &cobra.Command{
 			var rows [][]string
 			for _, evt := range events {
 				start := eventTimeString(evt.GetStart())
-				end := eventTimeString(evt.GetEnd())
-				timeStr := start
-				if end != "" {
-					timeStr = start + " → " + end
-				}
-				// Extract date from start
 				dateStr := ""
 				if evt.GetStart() != nil {
 					dt := deref(evt.GetStart().GetDateTime())
@@ -237,7 +329,6 @@ var calListCmd = &cobra.Command{
 				if len(id) > 20 {
 					id = id[:17] + "..."
 				}
-				_ = timeStr // use date + just start time for table
 				rows = append(rows, []string{dateStr, start, subject, showAs, id})
 			}
 			output.Table(headers, rows)
@@ -273,14 +364,21 @@ var calGetCmd = &cobra.Command{
 			return fmt.Errorf("fetching event: %w", err)
 		}
 
+		// Safety: redact body of private events
+		if isPrivateEvent(evt) {
+			output.Info("Note: this event is marked Private — body content redacted")
+		}
+
 		format := output.Resolve(flagJSON, flagPlain)
 
 		switch format {
 		case output.FormatJSON:
 			item := formatEventJSON(evt)
-			if evt.GetBody() != nil {
+			if evt.GetBody() != nil && !isPrivateEvent(evt) {
 				item["body"] = deref(evt.GetBody().GetContent())
 				item["body_type"] = evt.GetBody().GetContentType().String()
+			} else if isPrivateEvent(evt) {
+				item["body"] = "[REDACTED — event marked Private]"
 			}
 			if evt.GetWebLink() != nil {
 				item["web_link"] = deref(evt.GetWebLink())
@@ -313,11 +411,17 @@ var calGetCmd = &cobra.Command{
 			if evt.GetShowAs() != nil {
 				fmt.Printf("Show as:   %s\n", evt.GetShowAs().String())
 			}
+			if evt.GetSensitivity() != nil {
+				fmt.Printf("Privacy:   %s\n", evt.GetSensitivity().String())
+			}
+			if !isOrganizer(evt) {
+				fmt.Printf("Organizer: %s (you are an attendee)\n", recipientString(evt.GetOrganizer()))
+			}
 			if evt.GetSeriesMasterId() != nil {
 				fmt.Printf("Series:    Instance of %s\n", deref(evt.GetSeriesMasterId()))
 			}
 			fmt.Printf("ID:        %s\n", deref(evt.GetId()))
-			if evt.GetBody() != nil && deref(evt.GetBody().GetContent()) != "" {
+			if evt.GetBody() != nil && deref(evt.GetBody().GetContent()) != "" && !isPrivateEvent(evt) {
 				fmt.Println()
 				fmt.Println("─── Body ───")
 				fmt.Println(deref(evt.GetBody().GetContent()))
@@ -338,6 +442,7 @@ var (
 	calCreateAttendee []string
 	calCreateTeams    bool
 	calCreateBody     string
+	calCreateForce    bool
 )
 
 var calCreateCmd = &cobra.Command{
@@ -348,7 +453,7 @@ var calCreateCmd = &cobra.Command{
 			return fmt.Errorf("--subject, --start, and --end are required")
 		}
 
-		// Safety rule #1: timezone validation
+		// Safety: timezone validation
 		startTime, err := parseRFC3339Strict(calCreateStart)
 		if err != nil {
 			return err
@@ -358,12 +463,11 @@ var calCreateCmd = &cobra.Command{
 			return err
 		}
 
-		// Safety rule #2: no past events
+		// Safety: no past events
 		if err := rejectPastEvent(startTime, "create"); err != nil {
 			return err
 		}
 
-		// Validate end is after start
 		if !endTime.After(startTime) {
 			return fmt.Errorf("--end must be after --start")
 		}
@@ -389,24 +493,45 @@ var calCreateCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Safety rule #3: duplicate detection
-		dayStart := startTime.Format("2006-01-02") + "T00:00:00" + startTime.Format("-07:00")
-		dayEnd := startTime.AddDate(0, 0, 1).Format("2006-01-02") + "T00:00:00" + startTime.Format("-07:00")
-		viewConfig := &users.ItemCalendarViewRequestBuilderGetRequestConfiguration{
-			QueryParameters: &users.ItemCalendarViewRequestBuilderGetQueryParameters{
-				StartDateTime: &dayStart,
-				EndDateTime:   &dayEnd,
-				Select:        []string{"id", "subject", "start", "end"},
-			},
-		}
-		existingResult, err := client.Me().CalendarView().Get(ctx, viewConfig)
-		if err != nil {
-			return fmt.Errorf("checking for duplicates: %w", err)
-		}
-		for _, existing := range existingResult.GetValue() {
-			if strings.EqualFold(deref(existing.GetSubject()), calCreateSubject) {
-				return fmt.Errorf("duplicate detected: event %q already exists on %s (ID: %s) — use --force to override or choose a different time",
-					deref(existing.GetSubject()), startTime.Format("2 Jan 2006"), deref(existing.GetId()))
+		// Safety: duplicate + overlap detection
+		if !calCreateForce {
+			dayStart := startTime.Format("2006-01-02") + "T00:00:00" + startTime.Format("-07:00")
+			dayEnd := startTime.AddDate(0, 0, 1).Format("2006-01-02") + "T00:00:00" + startTime.Format("-07:00")
+			viewConfig := &users.ItemCalendarViewRequestBuilderGetRequestConfiguration{
+				QueryParameters: &users.ItemCalendarViewRequestBuilderGetQueryParameters{
+					StartDateTime: &dayStart,
+					EndDateTime:   &dayEnd,
+					Select:        []string{"id", "subject", "start", "end", "showAs"},
+				},
+			}
+			existingResult, err := client.Me().CalendarView().Get(ctx, viewConfig)
+			if err != nil {
+				return fmt.Errorf("checking for conflicts: %w", err)
+			}
+
+			for _, existing := range existingResult.GetValue() {
+				existStart, okS := parseEventStartTime(existing)
+				existEnd, okE := parseEventEndTime(existing)
+
+				// Check subject duplicate
+				if strings.EqualFold(deref(existing.GetSubject()), calCreateSubject) {
+					return fmt.Errorf("duplicate detected: event %q already exists on %s (ID: %s) — use --force to override",
+						deref(existing.GetSubject()), startTime.Format("2 Jan 2006"), deref(existing.GetId()))
+				}
+
+				// Check time overlap (skip all-day events for overlap)
+				if okS && okE && hasTimeOverlap(startTime, endTime, existStart, existEnd) {
+					showAs := ""
+					if existing.GetShowAs() != nil {
+						showAs = existing.GetShowAs().String()
+					}
+					if showAs == "busy" || showAs == "oof" || showAs == "tentative" {
+						return fmt.Errorf("time conflict: %q (%s–%s, %s) overlaps with your new event — use --force to double-book",
+							deref(existing.GetSubject()),
+							existStart.Format("3:04pm"), existEnd.Format("3:04pm"),
+							showAs)
+					}
+				}
 			}
 		}
 
@@ -453,6 +578,9 @@ var calCreateCmd = &cobra.Command{
 			evt.SetAttendees(attendees)
 		}
 
+		// Audit: tag agent-created events with [cb365] category
+		evt.SetCategories([]string{"cb365"})
+
 		result, err := client.Me().Events().Post(ctx, evt, nil)
 		if err != nil {
 			return fmt.Errorf("creating event: %w", err)
@@ -477,6 +605,7 @@ var (
 	calUpdateSubject string
 	calUpdateStart   string
 	calUpdateEnd     string
+	calUpdateForce   bool
 )
 
 var calUpdateCmd = &cobra.Command{
@@ -507,34 +636,42 @@ var calUpdateCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Fetch existing event to enforce safety rules
+		// Fetch existing event for safety checks
 		existing, err := client.Me().Events().ByEventId(calUpdateID).Get(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("fetching event for safety check: %w", err)
 		}
 
-		// Safety rule #4: reject series master modification
-		if existing.GetRecurrence() != nil && existing.GetSeriesMasterId() == nil {
+		// Safety: reject series master modification
+		if isSeriesMaster(existing) {
 			return fmt.Errorf("cannot update recurring event series master — modify specific future instances instead (use calendar list to find the instance ID)")
 		}
 
-		// Safety rule #2: check existing event is not in the past
-		if existing.GetStart() != nil {
-			dt := deref(existing.GetStart().GetDateTime())
-			tz := deref(existing.GetStart().GetTimeZone())
-			loc, locErr := time.LoadLocation(tz)
-			if locErr != nil {
-				loc = time.UTC
+		// Safety: no past event modification
+		if existingStart, ok := parseEventStartTime(existing); ok {
+			if err := rejectPastEvent(existingStart, "update"); err != nil {
+				return err
 			}
-			existingStart, parseErr := time.ParseInLocation("2006-01-02T15:04:05.0000000", dt, loc)
-			if parseErr != nil {
-				existingStart, _ = time.ParseInLocation("2006-01-02T15:04:05", dt, loc)
-			}
-			if !existingStart.IsZero() {
-				if err := rejectPastEvent(existingStart, "update"); err != nil {
-					return err
-				}
-			}
+		}
+
+		// Safety: block modification of Private events
+		if isPrivateEvent(existing) && !calUpdateForce {
+			return fmt.Errorf("event is marked Private — use --force to modify (respects confidentiality boundaries)")
+		}
+
+		// Safety: protect OOF/Busy blocks from silent modification
+		if isOOFOrBusy(existing) && !isOrganizer(existing) && !calUpdateForce {
+			return fmt.Errorf("event is marked %s and you are not the organizer — use --force to modify", existing.GetShowAs().String())
+		}
+
+		// Safety: block body/subject changes on received invitations
+		if !isOrganizer(existing) && (calUpdateSubject != "") {
+			return fmt.Errorf("cannot change subject of a meeting organised by someone else — only the organizer can modify invitation content")
+		}
+
+		// Safety: large meeting guard (>10 attendees)
+		if attendeeCount(existing) > 10 && !calUpdateForce {
+			return fmt.Errorf("event has %d attendees — use --force to confirm modification of a large meeting", attendeeCount(existing))
 		}
 
 		// Build update patch
@@ -630,34 +767,37 @@ var calDeleteCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Fetch event for safety checks before deleting
+		// Fetch event for safety checks
 		existing, err := client.Me().Events().ByEventId(calDeleteID).Get(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("fetching event for safety check: %w", err)
 		}
 
-		// Safety rule #4: reject series master deletion
-		if existing.GetRecurrence() != nil && existing.GetSeriesMasterId() == nil {
+		// Safety: reject series master deletion
+		if isSeriesMaster(existing) {
 			return fmt.Errorf("cannot delete recurring event series master — delete specific future instances instead")
 		}
 
-		// Safety rule #2: no past event deletion
-		if existing.GetStart() != nil {
-			dt := deref(existing.GetStart().GetDateTime())
-			tz := deref(existing.GetStart().GetTimeZone())
-			loc, locErr := time.LoadLocation(tz)
-			if locErr != nil {
-				loc = time.UTC
+		// Safety: no past event deletion
+		if existingStart, ok := parseEventStartTime(existing); ok {
+			if err := rejectPastEvent(existingStart, "delete"); err != nil {
+				return err
 			}
-			existingStart, parseErr := time.ParseInLocation("2006-01-02T15:04:05.0000000", dt, loc)
-			if parseErr != nil {
-				existingStart, _ = time.ParseInLocation("2006-01-02T15:04:05", dt, loc)
-			}
-			if !existingStart.IsZero() {
-				if err := rejectPastEvent(existingStart, "delete"); err != nil {
-					return err
-				}
-			}
+		}
+
+		// Safety: block deletion of Private events (extra confirmation)
+		if isPrivateEvent(existing) {
+			output.Info("Warning: deleting a Private event")
+		}
+
+		// Safety: protect OOF/Busy blocks
+		if isOOFOrBusy(existing) && !isOrganizer(existing) {
+			return fmt.Errorf("cannot delete event marked %s that you did not organise", existing.GetShowAs().String())
+		}
+
+		// Safety: large meeting guard
+		if attendeeCount(existing) > 10 {
+			output.Info(fmt.Sprintf("Warning: this event has %d attendees — deletion will affect all of them", attendeeCount(existing)))
 		}
 
 		if err := client.Me().Events().ByEventId(calDeleteID).Delete(ctx, nil); err != nil {
@@ -693,12 +833,14 @@ func init() {
 	calCreateCmd.Flags().StringArrayVar(&calCreateAttendee, "attendee", nil, "Attendee email (repeatable)")
 	calCreateCmd.Flags().BoolVar(&calCreateTeams, "teams", false, "Add Microsoft Teams meeting link")
 	calCreateCmd.Flags().StringVar(&calCreateBody, "body", "", "Event body/description (plain text)")
+	calCreateCmd.Flags().BoolVar(&calCreateForce, "force", false, "Override duplicate/overlap detection")
 
 	// calendar update
 	calUpdateCmd.Flags().StringVar(&calUpdateID, "id", "", "Event ID to update")
 	calUpdateCmd.Flags().StringVar(&calUpdateSubject, "subject", "", "New subject")
 	calUpdateCmd.Flags().StringVar(&calUpdateStart, "start", "", "New start time (RFC3339 with timezone)")
 	calUpdateCmd.Flags().StringVar(&calUpdateEnd, "end", "", "New end time (RFC3339 with timezone)")
+	calUpdateCmd.Flags().BoolVar(&calUpdateForce, "force", false, "Override safety guards (private events, OOF/Busy, large meetings)")
 
 	// calendar delete
 	calDeleteCmd.Flags().StringVar(&calDeleteID, "id", "", "Event ID to delete")
