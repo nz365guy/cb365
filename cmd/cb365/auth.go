@@ -68,6 +68,18 @@ var authLoginCmd = &cobra.Command{
 			output.Info("Using IPv4-only transport (CB365_IPV4_ONLY=1)")
 		}
 
+		// Pre-flight: verify token store is accessible BEFORE starting auth flow.
+		// This prevents the user from completing browser auth only to have the
+		// token discarded because the store can't be initialized.
+		if _, err := auth.LoadToken("__preflight_check__"); err != nil {
+			// LoadToken failing on a non-existent profile is expected (key not found).
+			// But if the error is about store initialization, that's a real problem.
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "CB365_KEYRING_PASSWORD") || strings.Contains(errMsg, "token store") || strings.Contains(errMsg, "keychain") {
+				return fmt.Errorf("token store not available — fix this BEFORE authenticating:\n  %s", errMsg)
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -410,4 +422,6 @@ func init() {
 	authCmd.AddCommand(authProfilesCmd)
 	authCmd.AddCommand(authUseCmd)
 }
+
+
 
