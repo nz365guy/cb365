@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"os"
+
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/config"
@@ -13,8 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Internal domain for external-send warnings
-const internalDomain = "cloverbase.com"
+// getInternalDomain returns the organisation's email domain for external-send warnings.
+// Set CB365_INTERNAL_DOMAIN to enable (e.g. "example.com"). Empty = no warnings.
+func getInternalDomain() string {
+	return os.Getenv("CB365_INTERNAL_DOMAIN")
+}
 
 // auditFooter is appended to all agent-sent emails for audit trail.
 const auditFooter = "\n\n---\n[Sent via cb365]"
@@ -98,7 +103,11 @@ func externalRecipients(to, cc string) []string {
 	all := strings.Split(to+","+cc, ",")
 	for _, addr := range all {
 		trimmed := strings.TrimSpace(addr)
-		if trimmed != "" && !strings.HasSuffix(strings.ToLower(trimmed), "@"+internalDomain) {
+		domain := getInternalDomain()
+		if domain == "" {
+			continue // no internal domain configured — skip external check
+		}
+		if trimmed != "" && !strings.HasSuffix(strings.ToLower(trimmed), "@"+domain) {
 			ext = append(ext, trimmed)
 		}
 	}
@@ -603,5 +612,6 @@ func init() {
 	mailCmd.AddCommand(mailSendCmd)
 	mailCmd.AddCommand(mailSearchCmd)
 }
+
 
 

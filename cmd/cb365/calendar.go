@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"os"
+
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/output"
@@ -16,14 +18,18 @@ import (
 //  Calendar safety helpers
 // ──────────────────────────────────────────────
 
-// nzNow returns the current time in Pacific/Auckland.
+// localNow returns the current time in the configured timezone.
+// Set CB365_TIMEZONE to override (e.g. "Pacific/Auckland"). Defaults to system timezone.
 // All past-event checks MUST use this, not time.Now().
-func nzNow() time.Time {
-	loc, err := time.LoadLocation("Pacific/Auckland")
-	if err != nil {
-		return time.Now() // fallback to system time
+func localNow() time.Time {
+	tz := os.Getenv("CB365_TIMEZONE")
+	if tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err == nil {
+			return time.Now().In(loc)
+		}
 	}
-	return time.Now().In(loc)
+	return time.Now()
 }
 
 // parseRFC3339Strict parses a datetime string and rejects bare datetimes without timezone.
@@ -39,9 +45,9 @@ func parseRFC3339Strict(s string) (time.Time, error) {
 	return t, nil
 }
 
-// rejectPastEvent enforces: no modifications to past events (Pacific/Auckland).
+// rejectPastEvent enforces: no modifications to past events (uses CB365_TIMEZONE or system time).
 func rejectPastEvent(startTime time.Time, action string) error {
-	if startTime.Before(nzNow()) {
+	if startTime.Before(localNow()) {
 		return fmt.Errorf("cannot %s event starting at %s — it is in the past (past events are historical records)", action, startTime.Format(time.RFC3339))
 	}
 	return nil
@@ -222,10 +228,14 @@ func eventTimeString(dtz models.DateTimeTimeZoneable) string {
 	if err != nil {
 		return dt
 	}
-	if tz == "Pacific/Auckland" || tz == "New Zealand Standard Time" {
+	localTZ := os.Getenv("CB365_TIMEZONE")
+	if localTZ != "" && (tz == localTZ || tz == "UTC") {
 		return t.Format("2 Jan 3:04pm")
 	}
-	return t.Format("2 Jan 3:04pm") + " (" + tz + ")"
+	if tz == "UTC" {
+		return t.Format("2 Jan 3:04pm") + " (UTC)"
+	}
+	return t.Format("2 Jan 3:04pm")
 }
 
 // ──────────────────────────────────────────────
@@ -853,4 +863,5 @@ func init() {
 	calendarCmd.AddCommand(calUpdateCmd)
 	calendarCmd.AddCommand(calDeleteCmd)
 }
+
 

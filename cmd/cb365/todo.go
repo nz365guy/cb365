@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"os"
+
 	"github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
@@ -590,7 +592,11 @@ var todoTasksCreateCmd = &cobra.Command{
 		if todoTasksCreateDue != "" {
 			dueDate := models.NewDateTimeTimeZone()
 			dueDate.SetDateTime(ptr(todoTasksCreateDue + "T00:00:00"))
-			dueDate.SetTimeZone(ptr("Pacific/Auckland"))
+			dueTZ := os.Getenv("CB365_TIMEZONE")
+			if dueTZ == "" {
+				dueTZ = "UTC"
+			}
+			dueDate.SetTimeZone(ptr(dueTZ))
 			body.SetDueDateTime(dueDate)
 		}
 
@@ -667,7 +673,11 @@ var todoTasksUpdateCmd = &cobra.Command{
 		if todoTasksUpdateDue != "" {
 			dueDate := models.NewDateTimeTimeZone()
 			dueDate.SetDateTime(ptr(todoTasksUpdateDue + "T00:00:00"))
-			dueDate.SetTimeZone(ptr("Pacific/Auckland"))
+			dueTZ := os.Getenv("CB365_TIMEZONE")
+			if dueTZ == "" {
+				dueTZ = "UTC"
+			}
+			dueDate.SetTimeZone(ptr(dueTZ))
 			body.SetDueDateTime(dueDate)
 			hasUpdate = true
 		}

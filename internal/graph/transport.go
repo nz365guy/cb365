@@ -8,7 +8,7 @@ import (
 )
 
 // NewIPv4Transport returns an http.Transport that only resolves IPv4 addresses.
-// Required for Azure NZ North which has broken IPv6 egress.
+// Useful for cloud regions with broken IPv6 egress (e.g. some Azure regions).
 func NewIPv4Transport() *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {

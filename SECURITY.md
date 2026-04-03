@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in cb365, **do not open a public issue**.
 
-Instead, please email **mark.smith@cloverbase.com** with:
+Instead, please email **security@cb365.dev** with:
 
 - Description of the vulnerability
 - Steps to reproduce

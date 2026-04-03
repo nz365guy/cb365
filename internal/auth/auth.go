@@ -60,7 +60,7 @@ func LoginDelegated(ctx context.Context, profile *config.Profile, ipv4Only bool)
 		},
 	}
 
-	// Wire in IPv4-only transport if needed (Azure NZ North IPv6 egress broken)
+	// Wire in IPv4-only transport if needed (some cloud regions have broken IPv6)
 	if ipv4Only {
 		opts.ClientOptions = azcore.ClientOptions{
 			Transport: graph.NewIPv4HTTPClient(),

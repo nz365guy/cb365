@@ -65,7 +65,7 @@ var authLoginCmd = &cobra.Command{
 
 		ipv4Only := auth.ShouldUseIPv4(cfg)
 		if ipv4Only && flagVerbose {
-			output.Info("Using IPv4-only transport (Azure NZ North IPv6 workaround)")
+			output.Info("Using IPv4-only transport (CB365_IPV4_ONLY=1)")
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
