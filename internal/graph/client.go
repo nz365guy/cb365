@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	azauth "github.com/microsoft/kiota-authentication-azure-go"
 	khttp "github.com/microsoft/kiota-http-go"
+	core "github.com/microsoftgraph/msgraph-sdk-go-core"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 )
 
@@ -27,6 +28,10 @@ func (s *StaticTokenCredential) GetToken(_ context.Context, _ policy.TokenReques
 
 // NewGraphClient creates an authenticated msgraph-sdk-go client from a raw access token.
 // The caller is responsible for loading and validating the token.
+//
+// IMPORTANT: The HTTP client MUST include the Graph SDK middleware pipeline
+// (telemetry, URL replacement for /me, retry, redirect). Without it, calls
+// to client.Me() resolve to "/users/me-token-to-replace" which Graph rejects.
 func NewGraphClient(accessToken string, expiresOn time.Time, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
 	cred := &StaticTokenCredential{token: accessToken, expiresOn: expiresOn}
 
@@ -36,11 +41,19 @@ func NewGraphClient(accessToken string, expiresOn time.Time, ipv4Only bool) (*ms
 		return nil, fmt.Errorf("creating auth provider: %w", err)
 	}
 
+	// Build Graph middleware (includes URL replacement: /users/me-token-to-replace → /me)
+	clientOptions := msgraphsdk.GetDefaultClientOptions()
+	middlewares := core.GetDefaultMiddlewaresWithOptions(&clientOptions)
+
 	var httpClient *http.Client
 	if ipv4Only {
-		httpClient = NewIPv4HTTPClient()
+		// Wrap IPv4-only transport with Graph middleware pipeline
+		transport := khttp.NewCustomTransportWithParentTransport(NewIPv4Transport(), middlewares...)
+		httpClient = &http.Client{Transport: transport}
 	} else {
-		httpClient = http.DefaultClient
+		// Wrap default transport with Graph middleware pipeline
+		transport := khttp.NewCustomTransport(middlewares...)
+		httpClient = &http.Client{Transport: transport}
 	}
 
 	adapter, err := khttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
@@ -52,3 +65,4 @@ func NewGraphClient(accessToken string, expiresOn time.Time, ipv4Only bool) (*ms
 
 	return msgraphsdk.NewGraphServiceClient(adapter), nil
 }
+
