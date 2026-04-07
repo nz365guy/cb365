@@ -47,6 +47,8 @@ You can. cb365 is a wrapper around the same Microsoft Graph API. But cb365 handl
 
 **From source (requires Go 1.24+):**
 
+> **Note:** Distro-packaged Go (e.g. `apt install golang-go`) is often too old. Download Go 1.24+ from [go.dev/dl](https://go.dev/dl/) if your system version is below 1.24.
+
 ```bash
 go install github.com/nz365guy/cb365/cmd/cb365@latest
 ```
@@ -80,6 +82,8 @@ sudo mv cb365 /usr/local/bin/
 6. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**
 7. Add the scopes you need (see [Scopes by Workload](#scopes-by-workload) below)
 8. Click **Grant admin consent** if you are a tenant admin, or ask your admin to consent
+
+> **Headless environment?** If you're running in WSL2, a CI runner, or an agent VM with no desktop session, set `export CB365_KEYRING_PASSWORD="your-passphrase"` before authenticating — see [Headless Linux Setup](#headless-linux-setup).
 
 ### Authenticate (2 minutes)
 
@@ -329,6 +333,8 @@ Add only the scopes you need when registering your Entra app.
 | OneDrive | `Files.ReadWrite.All` | `Files.ReadWrite.All` |
 | Loop | — | `FileStorageContainer.Selected` |
 
+> **Note:** Microsoft Graph does not support application permissions for To Do. You must use delegated (device-code) auth for all To Do operations. Attempting app-only auth for To Do will fail silently.
+
 **Minimal quick-start scopes** (To Do only):
 
 ```bash
@@ -463,7 +469,7 @@ Loop workspace IDs are not discoverable via Graph API. You need to populate a lo
 ]
 ```
 
-Use PowerShell with the SharePoint Online module to discover container IDs:
+Use PowerShell with the [SharePoint Online Management Shell](https://learn.microsoft.com/en-us/powershell/sharepoint/sharepoint-online/connect-sharepoint-online) (`Microsoft.Online.SharePoint.PowerShell`) to discover container IDs:
 
 ```powershell
 Connect-SPOService -Url https://yourtenant-admin.sharepoint.com
