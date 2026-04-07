@@ -136,6 +136,8 @@ cb365 auth login \
 
 The token expires after approximately 1 hour. Re-run the login command to refresh.
 
+> **Agent limitation:** Token refresh requires re-running the device-code flow, which needs human interaction (opening a browser, entering a code). This means delegated auth cannot be fully automated. For unattended agent workflows, use [app-only auth](#app-only-client-secret) instead.
+
 ### App-Only (Client Secret)
 
 For unattended automation. The app authenticates with a client secret. Requires application permissions (not delegated) in Entra.
@@ -175,6 +177,8 @@ cb365 auth status            # Show current token info
 cb365 auth logout --name old # Remove a profile
 cb365 todo lists list --profile work  # One-off profile override
 ```
+
+> **Naming convention:** We recommend `work-delegated` for interactive profiles and `work-app` for app-only automation. This makes it clear at a glance which auth flow a profile uses.
 
 ---
 
@@ -411,21 +415,42 @@ cb365 pairs well with AI agent orchestrators like OpenCLAW, LangChain, AutoGen, 
 ```markdown
 # cb365 — Microsoft 365 CLI Skill
 
-## Authentication
-The agent uses a pre-configured profile. Check status before operations:
-  cb365 auth status --profile work --json
+## Pre-flight (REQUIRED before every operation)
+Always verify auth before any command. If this fails, stop and re-authenticate:
+  cb365 auth status --profile work-delegated --json
 
 ## Reading Tasks
-  cb365 todo tasks list --list "Tasks" --json --profile work
+  cb365 todo tasks list --list "Tasks" --json --profile work-delegated
 
 ## Creating Tasks
-  cb365 todo tasks create --list "Tasks" --title "Review PR" --due 2026-04-15 --profile work
+  cb365 todo tasks create --list "Tasks" --title "Review PR" --due 2026-04-15 --profile work-delegated
 
 ## Safety
+- ALWAYS run auth status before any operation — tokens expire after ~1 hour
 - Always use --dry-run before write operations in uncertain contexts
 - Never pass --force without explicit user approval
-- Check auth status before any operation
 ```
+
+### Error Handling
+
+cb365 uses standard Unix exit codes: `0` for success, `1` for any failure (auth error, permission denied, missing arguments, Graph API error). Errors are printed as plain text to stderr.
+
+When using `--json`, successful output goes to stdout and errors still go to stderr. There is no structured JSON error envelope — agents should check the exit code and capture stderr separately:
+
+```bash
+# Capture both streams
+output=$(cb365 todo tasks list --list "Tasks" --json 2>/tmp/cb365-err)
+if [ $? -ne 0 ]; then
+  error=$(cat /tmp/cb365-err)
+  # Handle: "no active profile", "token expired", "403 Forbidden", etc.
+fi
+```
+
+Common error patterns:
+- `no active profile` — run `cb365 auth login` or `cb365 auth use`
+- `token expired` or `authentication failed` — re-authenticate
+- `403 Forbidden` / `insufficient privileges` — missing Graph API scopes
+- `--force is required` — destructive operation needs explicit confirmation
 
 ### Headless Linux Setup
 
@@ -543,6 +568,10 @@ govulncheck ./...
 | Loop (workspaces, pages) | ✅ Stable | App-only |
 
 ---
+
+## Acknowledgments
+
+Thanks to [Darren Robinson](https://github.com/darrenjrobinson) for testing cb365 as an OpenCLAW skill on WSL2, identifying documentation gaps in the Quick Start flow, headless auth setup, and agent integration patterns, and for contributing detailed feedback that shaped these docs.
 
 ## Contributing
 
