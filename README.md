@@ -1,3 +1,5 @@
+> 📖 For the rationale behind this build, read this blog post: [https://m1.nz/s6qxe1i](https://m1.nz/s6qxe1i)
+
 # cb365
 
 **Scriptable access to Microsoft 365 from the command line.**
