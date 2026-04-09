@@ -1,6 +1,6 @@
 # Security Review Guide
 
-> **Scope:** `internal/auth/` — 648 lines across 3 files
+> **Scope:** `internal/auth/` — 789 lines across 4 files
 > **Estimated time:** 2–4 hours
 > **Purpose:** Independent review before open-sourcing this repository
 
@@ -17,7 +17,8 @@ Three files — start here:
 | File | Lines | What It Does |
 |------|-------|-------------|
 | [`internal/auth/auth.go`](internal/auth/auth.go) | 287 | Token acquisition: device-code flow, client credentials, certificate auth. JWT decode for display (never logs raw tokens). |
-| [`internal/auth/keyring.go`](internal/auth/keyring.go) | 162 | OS keychain abstraction via `go-keyring`. Probes keychain availability on startup. Falls back to encrypted file if no keychain. |
+| [`internal/auth/credential.go`](internal/auth/credential.go) | 140 | MSAL persistent cache integration. Silent token refresh via `azidentity/cache` with CAE support and AuthenticationRecord persistence. |
+| [`internal/auth/keyring.go`](internal/auth/keyring.go) | 163 | OS keychain abstraction via `go-keyring`. Probes keychain availability on startup. Falls back to encrypted file if no keychain. |
 | [`internal/auth/store_file.go`](internal/auth/store_file.go) | 199 | AES-256-GCM encrypted file storage for headless Linux. PBKDF2 key derivation from environment variable passphrase. |
 
 Everything else in the repo (commands, output formatting, Graph API calls) is out of scope for this review.
@@ -29,6 +30,7 @@ The auth module depends on:
 | Package | Version | Role |
 |---------|---------|------|
 | `azidentity` v1.13.1 | Microsoft's official Entra ID library | All OAuth flows |
+| `azidentity/cache` v0.4.0 | Microsoft's MSAL persistent cache for Linux (kernel keyring) | Token cache persistence |
 | `go-keyring` v0.2.8 | OS-native keychain (macOS/Windows/Linux) | Token storage (primary) |
 | `golang.org/x/crypto` v0.47.0 | PBKDF2 key derivation | Encrypted file fallback |
 | Go stdlib `crypto/aes`, `crypto/cipher` | AES-256-GCM | Encrypted file fallback |

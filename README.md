@@ -134,9 +134,9 @@ cb365 auth login \
   --name work
 ```
 
-The token expires after approximately 1 hour. Re-run the login command to refresh.
+Tokens auto-refresh silently for approximately 90 days via MSAL persistent cache. After 90 days (or a VM reboot), re-run the login command.
 
-> **Agent limitation:** Token refresh requires re-running the device-code flow, which needs human interaction (opening a browser, entering a code). This means delegated auth cannot be fully automated. For unattended agent workflows, use [app-only auth](#app-only-client-secret) instead.
+> **Agent note:** After one interactive login, delegated tokens auto-refresh silently for ~90 days via MSAL persistent cache (CAE-enabled). No human interaction needed during that window. For fully zero-touch workflows (e.g. CI), use [app-only auth](#app-only-client-secret) instead.
 
 ### App-Only (Client Secret)
 
@@ -426,7 +426,7 @@ Always verify auth before any command. If this fails, stop and re-authenticate:
   cb365 todo tasks create --list "Tasks" --title "Review PR" --due 2026-04-15 --profile work-delegated
 
 ## Safety
-- ALWAYS run auth status before any operation — tokens expire after ~1 hour
+- Tokens auto-refresh silently (~90 days). If auth status shows expired, run auth login
 - Always use --dry-run before write operations in uncertain contexts
 - Never pass --force without explicit user approval
 ```
