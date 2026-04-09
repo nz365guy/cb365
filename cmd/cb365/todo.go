@@ -55,13 +55,18 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 
 	// ── Delegated profiles: use MSAL persistent cache for silent refresh ──
 	if profile.AuthMode == config.AuthModeDelegated {
-		cred, credErr := auth.NewDelegatedCredentialSilent(profile, ipv4Only)
+		// Load the stored AuthenticationRecord (needed for MSAL cache lookup)
+		cache, cacheErr := auth.LoadToken(profileName)
+		if cacheErr != nil {
+			return nil, fmt.Errorf("loading token: %w", cacheErr)
+		}
+
+		cred, credErr := auth.NewDelegatedCredentialSilent(profile, cache.AuthRecord, ipv4Only)
 		if credErr != nil {
 			return nil, credErr
 		}
 
 		// Pre-flight: verify we can get a token silently (MSAL uses cached refresh token).
-		// This gives a clear error message instead of failing deep inside a Graph call.
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -74,7 +79,7 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 			scopes = []string{"https://graph.microsoft.com/.default"}
 		}
 
-		token, tokenErr := cred.GetToken(ctx, policy.TokenRequestOptions{
+		token, tokenErr := cred.GetToken(ctx, policy.TokenRequestOptions{EnableCAE: true,
 			Scopes: scopes,
 		})
 		if tokenErr != nil {
@@ -82,18 +87,15 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		}
 
 		// Update our local cache so 'auth status' shows current token info
-		_ = auth.StoreToken(profileName, &auth.TokenCache{
-			AccessToken: token.Token,
-			ExpiresAt:   token.ExpiresOn.Format(time.RFC3339),
-			TokenType:   "Bearer",
-			Scope:       fmt.Sprintf("%v", profile.Scopes),
-		})
+		cache.AccessToken = token.Token
+		cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
+		_ = auth.StoreToken(profileName, cache)
 
 		if flagVerbose {
 			output.Success(fmt.Sprintf("Token valid until %s", token.ExpiresOn.Format(time.RFC3339)))
 		}
 
-		return graph.NewGraphClientWithCredential(cred, ipv4Only)
+		return graph.NewGraphClientWithCredential(cred, auth.GraphScopes(profile.Scopes), ipv4Only)
 	}
 
 	// ── App-only profiles: existing client-secret / certificate refresh ──

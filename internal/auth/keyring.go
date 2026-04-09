@@ -19,6 +19,7 @@ type TokenCache struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	ClientSecret string `json:"client_secret,omitempty"`
+	AuthRecord   string `json:"auth_record,omitempty"` // JSON-serialized azidentity.AuthenticationRecord for MSAL cache lookup
 	ExpiresAt    string `json:"expires_at"`
 	TokenType    string `json:"token_type"`
 	Scope        string `json:"scope"`

@@ -43,26 +43,24 @@ func newHTTPClient(ipv4Only bool) *http.Client {
 }
 
 // NewGraphClient creates an authenticated msgraph-sdk-go client from a raw access token.
-// The caller is responsible for loading and validating the token.
-//
-// IMPORTANT: The HTTP client MUST include the Graph SDK middleware pipeline
-// (telemetry, URL replacement for /me, retry, redirect). Without it, calls
-// to client.Me() resolve to "/users/me-token-to-replace" which Graph rejects.
+// Uses .default scope for the auth provider (fine for static tokens).
 func NewGraphClient(accessToken string, expiresOn time.Time, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
 	cred := &StaticTokenCredential{token: accessToken, expiresOn: expiresOn}
-	return newGraphClientFromCredential(cred, ipv4Only)
+	return newGraphClientFromCredential(cred, []string{"https://graph.microsoft.com/.default"}, ipv4Only)
 }
 
 // NewGraphClientWithCredential creates an authenticated msgraph-sdk-go client from
-// a live azcore.TokenCredential. Unlike NewGraphClient, this supports automatic
-// token refresh — the credential's GetToken() is called on each request, allowing
-// MSAL-backed credentials to silently use refresh tokens.
-func NewGraphClientWithCredential(cred azcore.TokenCredential, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
-	return newGraphClientFromCredential(cred, ipv4Only)
+// a live azcore.TokenCredential with explicit scopes. For MSAL-backed credentials,
+// the scopes MUST match what was used during login so that MSAL can find cached tokens
+// and silently refresh using the stored refresh token.
+func NewGraphClientWithCredential(cred azcore.TokenCredential, scopes []string, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
+	if len(scopes) == 0 {
+		scopes = []string{"https://graph.microsoft.com/.default"}
+	}
+	return newGraphClientFromCredential(cred, scopes, ipv4Only)
 }
 
-func newGraphClientFromCredential(cred azcore.TokenCredential, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
-	scopes := []string{"https://graph.microsoft.com/.default"}
+func newGraphClientFromCredential(cred azcore.TokenCredential, scopes []string, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
 	authProvider, err := azauth.NewAzureIdentityAuthenticationProviderWithScopes(cred, scopes)
 	if err != nil {
 		return nil, fmt.Errorf("creating auth provider: %w", err)

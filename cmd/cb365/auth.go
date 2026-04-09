@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
@@ -88,6 +88,7 @@ var authLoginCmd = &cobra.Command{
 		var tokenStr string
 		var expiresOn time.Time
 		var clientSecretToStore string
+		var authRecordStr string
 
 		if mode == config.AuthModeAppOnly {
 			// App-only: certificate auth OR client credentials
@@ -134,27 +135,23 @@ var authLoginCmd = &cobra.Command{
 			// silent renewal for ~90 days without user interaction.
 			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow (with persistent cache)...", profileName))
 
-			cred, credErr := auth.NewDelegatedCredentialInteractive(profile, ipv4Only, func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+			result, loginErr := auth.LoginDelegatedWithCache(ctx, profile, ipv4Only, func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
 				fmt.Println()
 				fmt.Println(msg.Message)
 				fmt.Println()
 				return nil
 			})
-			if credErr != nil {
-				return fmt.Errorf("creating credential: %w", credErr)
+			if loginErr != nil {
+				return fmt.Errorf("authentication failed: %w", loginErr)
 			}
+			tokenStr = result.Token.Token
+			expiresOn = result.Token.ExpiresOn
 
-			scopes := auth.GraphScopes(profile.Scopes)
-			if len(scopes) == 0 {
-				scopes = []string{"https://graph.microsoft.com/.default"}
+			// Serialize the AuthenticationRecord for future silent refresh
+			recordJSON, marshalErr := json.Marshal(result.AuthRecord)
+			if marshalErr == nil {
+				authRecordStr = string(recordJSON)
 			}
-
-			token, tokenErr := cred.GetToken(ctx, policy.TokenRequestOptions{Scopes: scopes})
-			if tokenErr != nil {
-				return fmt.Errorf("authentication failed: %w", tokenErr)
-			}
-			tokenStr = token.Token
-			expiresOn = token.ExpiresOn
 
 			info, decodeErr := auth.DecodeTokenInfo(tokenStr)
 			if decodeErr == nil && info.UPN != "" {
@@ -165,6 +162,7 @@ var authLoginCmd = &cobra.Command{
 		cache := &auth.TokenCache{
 			AccessToken:  tokenStr,
 			ClientSecret: clientSecretToStore,
+			AuthRecord:   authRecordStr,
 			ExpiresAt:    expiresOn.Format(time.RFC3339),
 			TokenType:    "Bearer",
 			Scope:        fmt.Sprintf("%v", profile.Scopes),
@@ -238,7 +236,7 @@ var authStatusCmd = &cobra.Command{
 					output.Info("Token expired \u2014 refreshing via MSAL cache...")
 				}
 
-				token, refreshErr := auth.GetTokenSilent(ctx, profile, profile.Scopes, ipv4Only)
+				token, refreshErr := auth.GetTokenSilent(ctx, profile, cache.AuthRecord, profile.Scopes, ipv4Only)
 				if refreshErr != nil {
 					return fmt.Errorf("silent refresh failed: %w", refreshErr)
 				}
