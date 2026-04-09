@@ -11,6 +11,7 @@ import (
 	"github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/graph"
@@ -50,17 +51,60 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		return nil, fmt.Errorf("profile %q not found", profileName)
 	}
 
+	ipv4Only := auth.ShouldUseIPv4(cfg)
+
+	// ── Delegated profiles: use MSAL persistent cache for silent refresh ──
+	if profile.AuthMode == config.AuthModeDelegated {
+		cred, credErr := auth.NewDelegatedCredentialSilent(profile, ipv4Only)
+		if credErr != nil {
+			return nil, credErr
+		}
+
+		// Pre-flight: verify we can get a token silently (MSAL uses cached refresh token).
+		// This gives a clear error message instead of failing deep inside a Graph call.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if flagVerbose {
+			output.Info("Acquiring token via MSAL cache (silent refresh)...")
+		}
+
+		scopes := auth.GraphScopes(profile.Scopes)
+		if len(scopes) == 0 {
+			scopes = []string{"https://graph.microsoft.com/.default"}
+		}
+
+		token, tokenErr := cred.GetToken(ctx, policy.TokenRequestOptions{
+			Scopes: scopes,
+		})
+		if tokenErr != nil {
+			return nil, fmt.Errorf("token refresh failed — run 'cb365 auth login --profile %s' to re-authenticate: %w", profileName, tokenErr)
+		}
+
+		// Update our local cache so 'auth status' shows current token info
+		_ = auth.StoreToken(profileName, &auth.TokenCache{
+			AccessToken: token.Token,
+			ExpiresAt:   token.ExpiresOn.Format(time.RFC3339),
+			TokenType:   "Bearer",
+			Scope:       fmt.Sprintf("%v", profile.Scopes),
+		})
+
+		if flagVerbose {
+			output.Success(fmt.Sprintf("Token valid until %s", token.ExpiresOn.Format(time.RFC3339)))
+		}
+
+		return graph.NewGraphClientWithCredential(cred, ipv4Only)
+	}
+
+	// ── App-only profiles: existing client-secret / certificate refresh ──
 	cache, err := auth.LoadToken(profileName)
 	if err != nil {
 		return nil, fmt.Errorf("loading token: %w", err)
 	}
 
-	ipv4Only := auth.ShouldUseIPv4(cfg)
-
-	info, err := auth.DecodeTokenInfo(cache.AccessToken)
-	if err != nil || info.IsExpired {
-		// Auto-refresh for app-only profiles
-		if profile.AuthMode == config.AuthModeAppOnly && cache.ClientSecret != "" {
+	info, decodeErr := auth.DecodeTokenInfo(cache.AccessToken)
+	if decodeErr != nil || info.IsExpired {
+		if cache.ClientSecret != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
@@ -82,12 +126,12 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 			return graph.NewGraphClient(cache.AccessToken, token.ExpiresOn, ipv4Only)
 		}
 
-		return nil, fmt.Errorf("token expired — run 'cb365 auth login' to re-authenticate")
+		return nil, fmt.Errorf("token expired — run 'cb365 auth login --profile %s' to re-authenticate", profileName)
 	}
 
-	expiresAt, err := time.Parse(time.RFC3339, info.ExpiresAt)
-	if err != nil {
-		return nil, fmt.Errorf("parsing token expiry: %w", err)
+	expiresAt, parseErr := time.Parse(time.RFC3339, info.ExpiresAt)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing token expiry: %w", parseErr)
 	}
 
 	return graph.NewGraphClient(cache.AccessToken, expiresAt, ipv4Only)

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/output"
@@ -127,12 +129,29 @@ var authLoginCmd = &cobra.Command{
 				profile.Username = "(app-only)"
 			}
 		} else {
-			// Delegated: device-code flow
-			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow...", profileName))
+			// Delegated: device-code flow with MSAL persistent cache.
+			// MSAL stores both access and refresh tokens, enabling
+			// silent renewal for ~90 days without user interaction.
+			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow (with persistent cache)...", profileName))
 
-			token, err := auth.LoginDelegated(ctx, profile, ipv4Only)
-			if err != nil {
-				return fmt.Errorf("authentication failed: %w", err)
+			cred, credErr := auth.NewDelegatedCredentialInteractive(profile, ipv4Only, func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+				fmt.Println()
+				fmt.Println(msg.Message)
+				fmt.Println()
+				return nil
+			})
+			if credErr != nil {
+				return fmt.Errorf("creating credential: %w", credErr)
+			}
+
+			scopes := auth.GraphScopes(profile.Scopes)
+			if len(scopes) == 0 {
+				scopes = []string{"https://graph.microsoft.com/.default"}
+			}
+
+			token, tokenErr := cred.GetToken(ctx, policy.TokenRequestOptions{Scopes: scopes})
+			if tokenErr != nil {
+				return fmt.Errorf("authentication failed: %w", tokenErr)
 			}
 			tokenStr = token.Token
 			expiresOn = token.ExpiresOn
@@ -204,6 +223,34 @@ var authStatusCmd = &cobra.Command{
 		cache, err := auth.LoadToken(profileName)
 		if err != nil {
 			return err
+		}
+
+		// Auto-refresh expired delegated tokens via MSAL persistent cache
+		if profile.AuthMode == config.AuthModeDelegated {
+			info, decodeErr := auth.DecodeTokenInfo(cache.AccessToken)
+			if decodeErr != nil || info.IsExpired {
+				cfg2, _ := config.Load()
+				ipv4Only := auth.ShouldUseIPv4(cfg2)
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				if flagVerbose {
+					output.Info("Token expired \u2014 refreshing via MSAL cache...")
+				}
+
+				token, refreshErr := auth.GetTokenSilent(ctx, profile, profile.Scopes, ipv4Only)
+				if refreshErr != nil {
+					return fmt.Errorf("silent refresh failed: %w", refreshErr)
+				}
+
+				cache.AccessToken = token.Token
+				cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
+				_ = auth.StoreToken(profileName, cache)
+
+				if flagVerbose {
+					output.Success("Token refreshed successfully")
+				}
+			}
 		}
 
 		// Auto-refresh expired app-only tokens using stored client secret

@@ -26,6 +26,22 @@ func (s *StaticTokenCredential) GetToken(_ context.Context, _ policy.TokenReques
 	return azcore.AccessToken{Token: s.token, ExpiresOn: s.expiresOn}, nil
 }
 
+// newHTTPClient creates an http.Client with the Graph SDK middleware pipeline.
+func newHTTPClient(ipv4Only bool) *http.Client {
+	clientOptions := msgraphsdk.GetDefaultClientOptions()
+	middlewares := core.GetDefaultMiddlewaresWithOptions(&clientOptions)
+
+	var httpClient *http.Client
+	if ipv4Only {
+		transport := khttp.NewCustomTransportWithParentTransport(NewIPv4Transport(), middlewares...)
+		httpClient = &http.Client{Transport: transport}
+	} else {
+		transport := khttp.NewCustomTransport(middlewares...)
+		httpClient = &http.Client{Transport: transport}
+	}
+	return httpClient
+}
+
 // NewGraphClient creates an authenticated msgraph-sdk-go client from a raw access token.
 // The caller is responsible for loading and validating the token.
 //
@@ -34,27 +50,25 @@ func (s *StaticTokenCredential) GetToken(_ context.Context, _ policy.TokenReques
 // to client.Me() resolve to "/users/me-token-to-replace" which Graph rejects.
 func NewGraphClient(accessToken string, expiresOn time.Time, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
 	cred := &StaticTokenCredential{token: accessToken, expiresOn: expiresOn}
+	return newGraphClientFromCredential(cred, ipv4Only)
+}
 
+// NewGraphClientWithCredential creates an authenticated msgraph-sdk-go client from
+// a live azcore.TokenCredential. Unlike NewGraphClient, this supports automatic
+// token refresh — the credential's GetToken() is called on each request, allowing
+// MSAL-backed credentials to silently use refresh tokens.
+func NewGraphClientWithCredential(cred azcore.TokenCredential, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
+	return newGraphClientFromCredential(cred, ipv4Only)
+}
+
+func newGraphClientFromCredential(cred azcore.TokenCredential, ipv4Only bool) (*msgraphsdk.GraphServiceClient, error) {
 	scopes := []string{"https://graph.microsoft.com/.default"}
 	authProvider, err := azauth.NewAzureIdentityAuthenticationProviderWithScopes(cred, scopes)
 	if err != nil {
 		return nil, fmt.Errorf("creating auth provider: %w", err)
 	}
 
-	// Build Graph middleware (includes URL replacement: /users/me-token-to-replace → /me)
-	clientOptions := msgraphsdk.GetDefaultClientOptions()
-	middlewares := core.GetDefaultMiddlewaresWithOptions(&clientOptions)
-
-	var httpClient *http.Client
-	if ipv4Only {
-		// Wrap IPv4-only transport with Graph middleware pipeline
-		transport := khttp.NewCustomTransportWithParentTransport(NewIPv4Transport(), middlewares...)
-		httpClient = &http.Client{Transport: transport}
-	} else {
-		// Wrap default transport with Graph middleware pipeline
-		transport := khttp.NewCustomTransport(middlewares...)
-		httpClient = &http.Client{Transport: transport}
-	}
+	httpClient := newHTTPClient(ipv4Only)
 
 	adapter, err := khttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
 		authProvider, nil, nil, httpClient,
