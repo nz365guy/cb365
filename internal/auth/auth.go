@@ -285,3 +285,13 @@ func LoginCertificate(ctx context.Context, profile *config.Profile, pemPath stri
 
 	return token, nil
 }
+
+// RefreshCertificate uses a stored certificate path to get a fresh app-only token.
+// Returns the new token. Caller must persist the cache.
+func RefreshCertificate(ctx context.Context, profile *config.Profile, cache *TokenCache, ipv4Only bool) (azcore.AccessToken, error) {
+	if cache.CertPath == "" {
+		return azcore.AccessToken{}, fmt.Errorf("no certificate path stored for profile %q — run 'cb365 auth login --mode app-only --certificate <path>'", profile.Name)
+	}
+
+	return LoginCertificate(ctx, profile, cache.CertPath, ipv4Only)
+}

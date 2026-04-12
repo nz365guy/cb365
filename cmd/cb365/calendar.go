@@ -8,11 +8,18 @@ import (
 
 	"os"
 
+	msgraphsdkgo "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
+
+// ──────────────────────────────────────────────
+//  Calendar --user flag (app-only auth support)
+// ──────────────────────────────────────────────
+
+var calUser string
 
 // ──────────────────────────────────────────────
 //  Calendar safety helpers
@@ -239,6 +246,50 @@ func eventTimeString(dtz models.DateTimeTimeZoneable) string {
 }
 
 // ──────────────────────────────────────────────
+//  User-aware Graph API helpers (--user support)
+// ──────────────────────────────────────────────
+
+// calGetCalendarView fetches calendar view events for the target user (--user) or /me.
+func calGetCalendarView(client *msgraphsdkgo.GraphServiceClient, ctx context.Context, config *users.ItemCalendarViewRequestBuilderGetRequestConfiguration) (models.EventCollectionResponseable, error) {
+	if calUser != "" {
+		return client.Users().ByUserId(calUser).CalendarView().Get(ctx, config)
+	}
+	return client.Me().CalendarView().Get(ctx, config)
+}
+
+// calGetEvent fetches a single event by ID for the target user or /me.
+func calGetEvent(client *msgraphsdkgo.GraphServiceClient, ctx context.Context, eventID string) (models.Eventable, error) {
+	if calUser != "" {
+		return client.Users().ByUserId(calUser).Events().ByEventId(eventID).Get(ctx, nil)
+	}
+	return client.Me().Events().ByEventId(eventID).Get(ctx, nil)
+}
+
+// calPatchEvent updates an event for the target user or /me.
+func calPatchEvent(client *msgraphsdkgo.GraphServiceClient, ctx context.Context, eventID string, patch models.Eventable) (models.Eventable, error) {
+	if calUser != "" {
+		return client.Users().ByUserId(calUser).Events().ByEventId(eventID).Patch(ctx, patch, nil)
+	}
+	return client.Me().Events().ByEventId(eventID).Patch(ctx, patch, nil)
+}
+
+// calDeleteEvent deletes an event for the target user or /me.
+func calDeleteEvent(client *msgraphsdkgo.GraphServiceClient, ctx context.Context, eventID string) error {
+	if calUser != "" {
+		return client.Users().ByUserId(calUser).Events().ByEventId(eventID).Delete(ctx, nil)
+	}
+	return client.Me().Events().ByEventId(eventID).Delete(ctx, nil)
+}
+
+// calPostEvent creates an event for the target user or /me.
+func calPostEvent(client *msgraphsdkgo.GraphServiceClient, ctx context.Context, evt models.Eventable) (models.Eventable, error) {
+	if calUser != "" {
+		return client.Users().ByUserId(calUser).Events().Post(ctx, evt, nil)
+	}
+	return client.Me().Events().Post(ctx, evt, nil)
+}
+
+// ──────────────────────────────────────────────
 //  Parent command
 // ──────────────────────────────────────────────
 
@@ -280,7 +331,7 @@ var calListCmd = &cobra.Command{
 			},
 		}
 
-		result, err := client.Me().CalendarView().Get(ctx, reqConfig)
+		result, err := calGetCalendarView(client, ctx, reqConfig)
 		if err != nil {
 			return fmt.Errorf("fetching calendar events: %w", err)
 		}
@@ -369,7 +420,7 @@ var calGetCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		evt, err := client.Me().Events().ByEventId(calGetID).Get(ctx, nil)
+		evt, err := calGetEvent(client, ctx, calGetID)
 		if err != nil {
 			return fmt.Errorf("fetching event: %w", err)
 		}
@@ -514,7 +565,7 @@ var calCreateCmd = &cobra.Command{
 					Select:        []string{"id", "subject", "start", "end", "showAs"},
 				},
 			}
-			existingResult, err := client.Me().CalendarView().Get(ctx, viewConfig)
+			existingResult, err := calGetCalendarView(client, ctx, viewConfig)
 			if err != nil {
 				return fmt.Errorf("checking for conflicts: %w", err)
 			}
@@ -591,7 +642,7 @@ var calCreateCmd = &cobra.Command{
 		// Audit: tag agent-created events with [cb365] category
 		evt.SetCategories([]string{"cb365"})
 
-		result, err := client.Me().Events().Post(ctx, evt, nil)
+		result, err := calPostEvent(client, ctx, evt)
 		if err != nil {
 			return fmt.Errorf("creating event: %w", err)
 		}
@@ -647,7 +698,7 @@ var calUpdateCmd = &cobra.Command{
 		defer cancel()
 
 		// Fetch existing event for safety checks
-		existing, err := client.Me().Events().ByEventId(calUpdateID).Get(ctx, nil)
+		existing, err := calGetEvent(client, ctx, calUpdateID)
 		if err != nil {
 			return fmt.Errorf("fetching event for safety check: %w", err)
 		}
@@ -722,7 +773,7 @@ var calUpdateCmd = &cobra.Command{
 			return fmt.Errorf("nothing to update — specify --subject, --start, or --end")
 		}
 
-		result, err := client.Me().Events().ByEventId(calUpdateID).Patch(ctx, patch, nil)
+		result, err := calPatchEvent(client, ctx, calUpdateID, patch)
 		if err != nil {
 			return fmt.Errorf("updating event: %w", err)
 		}
@@ -778,7 +829,7 @@ var calDeleteCmd = &cobra.Command{
 		defer cancel()
 
 		// Fetch event for safety checks
-		existing, err := client.Me().Events().ByEventId(calDeleteID).Get(ctx, nil)
+		existing, err := calGetEvent(client, ctx, calDeleteID)
 		if err != nil {
 			return fmt.Errorf("fetching event for safety check: %w", err)
 		}
@@ -810,7 +861,7 @@ var calDeleteCmd = &cobra.Command{
 			output.Info(fmt.Sprintf("Warning: this event has %d attendees — deletion will affect all of them", attendeeCount(existing)))
 		}
 
-		if err := client.Me().Events().ByEventId(calDeleteID).Delete(ctx, nil); err != nil {
+		if err := calDeleteEvent(client, ctx, calDeleteID); err != nil {
 			return fmt.Errorf("deleting event: %w", err)
 		}
 
@@ -855,6 +906,9 @@ func init() {
 	// calendar delete
 	calDeleteCmd.Flags().StringVar(&calDeleteID, "id", "", "Event ID to delete")
 	calDeleteCmd.Flags().BoolVar(&calDeleteForce, "force", false, "Confirm destructive operation")
+
+	// calendar --user (persistent, inherited by all subcommands)
+	calendarCmd.PersistentFlags().StringVar(&calUser, "user", "", "Target user UPN or ID (required for app-only auth, e.g. user@domain.com)")
 
 	// Wire
 	calendarCmd.AddCommand(calListCmd)

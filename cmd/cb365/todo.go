@@ -128,6 +128,29 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 			return graph.NewGraphClient(cache.AccessToken, token.ExpiresOn, ipv4Only)
 		}
 
+		// Certificate-based auto-refresh (unattended, no user interaction)
+		if cache.CertPath != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			if flagVerbose {
+				output.Info("Token expired — refreshing via certificate...")
+			}
+
+			token, refreshErr := auth.RefreshCertificate(ctx, profile, cache, ipv4Only)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("certificate auto-refresh failed: %w", refreshErr)
+			}
+
+			cache.AccessToken = token.Token
+			cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
+			if storeErr := auth.StoreToken(profileName, cache); storeErr != nil {
+				return nil, fmt.Errorf("storing refreshed token: %w", storeErr)
+			}
+
+			return graph.NewGraphClient(cache.AccessToken, token.ExpiresOn, ipv4Only)
+		}
+
 		return nil, fmt.Errorf("token expired — run 'cb365 auth login --profile %s' to re-authenticate", profileName)
 	}
 

@@ -88,6 +88,7 @@ var authLoginCmd = &cobra.Command{
 		var tokenStr string
 		var expiresOn time.Time
 		var clientSecretToStore string
+		var certPathToStore string
 		var authRecordStr string
 
 		if mode == config.AuthModeAppOnly {
@@ -103,6 +104,7 @@ var authLoginCmd = &cobra.Command{
 				tokenStr = certToken.Token
 				expiresOn = certToken.ExpiresOn
 				profile.Username = "(app-only/certificate)"
+				certPathToStore = loginCertificate
 			} else {
 				// Client credentials flow — secret required
 				if loginClientSecret == "" {
@@ -162,6 +164,7 @@ var authLoginCmd = &cobra.Command{
 		cache := &auth.TokenCache{
 			AccessToken:  tokenStr,
 			ClientSecret: clientSecretToStore,
+			CertPath:     certPathToStore,
 			AuthRecord:   authRecordStr,
 			ExpiresAt:    expiresOn.Format(time.RFC3339),
 			TokenType:    "Bearer",
