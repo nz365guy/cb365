@@ -3,7 +3,7 @@ module github.com/nz365guy/cb365
 go 1.25.0
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache v0.4.0
 	github.com/microsoft/kiota-abstractions-go v1.9.3
@@ -13,11 +13,11 @@ require (
 	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8
-	golang.org/x/crypto v0.49.0
+	golang.org/x/crypto v0.50.0
 )
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
@@ -40,7 +40,7 @@ require (
 	go.opentelemetry.io/otel v1.37.0 // indirect
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 )
