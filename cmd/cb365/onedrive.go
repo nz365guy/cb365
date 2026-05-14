@@ -8,11 +8,27 @@ import (
 	"strings"
 	"time"
 
+	msgraphsdkgo "github.com/microsoftgraph/msgraph-sdk-go"
 	drivesPkg "github.com/microsoftgraph/msgraph-sdk-go/drives"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
+
+// ──────────────────────────────────────────────
+//  OneDrive --user flag (app-only auth support)
+// ──────────────────────────────────────────────
+
+var odUser string
+
+// odGetUserDrive resolves the target user's drive — via /users/{upn}/drive when
+// --user is set (required for app-only auth), or /me/drive otherwise.
+func odGetUserDrive(client *msgraphsdkgo.GraphServiceClient, ctx context.Context) (models.Driveable, error) {
+	if odUser != "" {
+		return client.Users().ByUserId(odUser).Drive().Get(ctx, nil)
+	}
+	return client.Me().Drive().Get(ctx, nil)
+}
 
 // ──────────────────────────────────────────────
 //  OneDrive helpers
@@ -68,7 +84,7 @@ Examples:
 		defer cancel()
 
 		// Get the user's drive ID first
-		drive, err := client.Me().Drive().Get(ctx, nil)
+		drive, err := odGetUserDrive(client, ctx)
 		if err != nil {
 			return fmt.Errorf("getting user drive: %w", err)
 		}
@@ -279,7 +295,7 @@ Examples:
 		defer cancel()
 
 		// Get the user's drive
-		drive, err := client.Me().Drive().Get(ctx, nil)
+		drive, err := odGetUserDrive(client, ctx)
 		if err != nil {
 			return fmt.Errorf("getting user drive: %w", err)
 		}
@@ -400,7 +416,7 @@ Examples:
 		defer cancel()
 
 		// Get the user's drive
-		drive, err := client.Me().Drive().Get(ctx, nil)
+		drive, err := odGetUserDrive(client, ctx)
 		if err != nil {
 			return fmt.Errorf("getting user drive: %w", err)
 		}
@@ -489,7 +505,7 @@ Examples:
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		drive, err := client.Me().Drive().Get(ctx, nil)
+		drive, err := odGetUserDrive(client, ctx)
 		if err != nil {
 			return fmt.Errorf("getting user drive: %w", err)
 		}
@@ -560,7 +576,7 @@ Examples:
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		drive, err := client.Me().Drive().Get(ctx, nil)
+		drive, err := odGetUserDrive(client, ctx)
 		if err != nil {
 			return fmt.Errorf("getting user drive: %w", err)
 		}
@@ -618,6 +634,9 @@ Examples:
 // ──────────────────────────────────────────────
 
 func init() {
+	// onedrive --user (app-only auth support) — persistent across all subcommands
+	onedriveCmd.PersistentFlags().StringVar(&odUser, "user", "", "Target user UPN (e.g., name@tenant.com); required for app-only auth, defaults to /me")
+
 	// onedrive ls
 	onedriveLsCmd.Flags().String("path", "", "OneDrive path (e.g., /Documents)")
 	onedriveLsCmd.Flags().String("item-id", "", "Drive item ID")
