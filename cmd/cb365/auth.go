@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
@@ -254,8 +255,10 @@ var authStatusCmd = &cobra.Command{
 			}
 		}
 
-		// Auto-refresh expired app-only tokens using stored client secret
-		if profile.AuthMode == config.AuthModeAppOnly && cache.ClientSecret != "" {
+		// Auto-refresh expired app-only tokens.
+		// Two credential paths: stored client secret, or stored certificate.
+		// Certificate path is preferred for work-cert profiles (Loop/SPE).
+		if profile.AuthMode == config.AuthModeAppOnly && (cache.ClientSecret != "" || cache.CertPath != "") {
 			info, decodeErr := auth.DecodeTokenInfo(cache.AccessToken)
 			if decodeErr != nil || info.IsExpired {
 				cfg2, _ := config.Load()
@@ -263,11 +266,19 @@ var authStatusCmd = &cobra.Command{
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				if flagVerbose {
-					output.Info("Token expired — refreshing via client credentials...")
+				var token azcore.AccessToken
+				var refreshErr error
+				if cache.CertPath != "" {
+					if flagVerbose {
+						output.Info("Token expired, refreshing via certificate...")
+					}
+					token, refreshErr = auth.RefreshCertificate(ctx, profile, cache, ipv4Only)
+				} else {
+					if flagVerbose {
+						output.Info("Token expired, refreshing via client credentials...")
+					}
+					token, refreshErr = auth.RefreshAppOnly(ctx, profile, cache, ipv4Only)
 				}
-
-				token, refreshErr := auth.RefreshAppOnly(ctx, profile, cache, ipv4Only)
 				if refreshErr != nil {
 					return fmt.Errorf("auto-refresh failed: %w", refreshErr)
 				}
