@@ -86,10 +86,13 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 			return nil, fmt.Errorf("token refresh failed — run 'cb365 auth login --profile %s' to re-authenticate: %w", profileName, tokenErr)
 		}
 
-		// Update our local cache so 'auth status' shows current token info
+		// Update our local cache so 'auth status' shows current token info.
+		// Persistence failure must propagate so callers fail loudly, not silently.
 		cache.AccessToken = token.Token
 		cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
-		_ = auth.StoreToken(profileName, cache)
+		if storeErr := auth.StoreToken(profileName, cache); storeErr != nil {
+			return nil, fmt.Errorf("storing refreshed token: %w", storeErr)
+		}
 
 		if flagVerbose {
 			output.Success(fmt.Sprintf("Token valid until %s", token.ExpiresOn.Format(time.RFC3339)))

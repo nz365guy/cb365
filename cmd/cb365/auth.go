@@ -247,7 +247,9 @@ var authStatusCmd = &cobra.Command{
 
 				cache.AccessToken = token.Token
 				cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
-				_ = auth.StoreToken(profileName, cache)
+				if err := auth.StoreToken(profileName, cache); err != nil {
+					return fmt.Errorf("storing refreshed token: %w", err)
+				}
 
 				if flagVerbose {
 					output.Success("Token refreshed successfully")
