@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
-	"strings"
+	"encoding/pem"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -302,10 +306,49 @@ var authStatusCmd = &cobra.Command{
 			return fmt.Errorf("decoding token: %w", err)
 		}
 
+		// Surface upcoming credential expiry before it becomes an auth failure.
+		// Thresholds are configurable via CB365_CERT_WARN_DAYS / CB365_REFRESH_WARN_DAYS.
+		certWarnDays := envIntDefault("CB365_CERT_WARN_DAYS", 30)
+		refreshWarnDays := envIntDefault("CB365_REFRESH_WARN_DAYS", 14)
+
+		var (
+			certExpiresAt       string
+			certDaysRemaining   int
+			haveCertExpiry      bool
+			certWithinThreshold bool
+		)
+		if cache.CertPath != "" {
+			if notAfter, certErr := parseCertNotAfter(cache.CertPath); certErr == nil {
+				haveCertExpiry = true
+				certExpiresAt = notAfter.Format(time.RFC3339)
+				certDaysRemaining = int(time.Until(notAfter).Hours() / 24)
+				certWithinThreshold = certDaysRemaining < certWarnDays
+			} else if flagVerbose {
+				output.Info(fmt.Sprintf("certificate expiry unavailable: %v", certErr))
+			}
+		}
+
+		var (
+			refreshExpiresAt       string
+			refreshDaysRemaining   int
+			haveRefreshExpiry      bool
+			refreshWithinThreshold bool
+		)
+		if profile.AuthMode == config.AuthModeDelegated && info.IssuedAt != "" {
+			if issued, parseErr := time.Parse(time.RFC3339, info.IssuedAt); parseErr == nil {
+				// MSAL refresh tokens use a sliding ~90-day window from issuance.
+				refreshExpiry := issued.Add(90 * 24 * time.Hour)
+				haveRefreshExpiry = true
+				refreshExpiresAt = refreshExpiry.Format(time.RFC3339)
+				refreshDaysRemaining = int(time.Until(refreshExpiry).Hours() / 24)
+				refreshWithinThreshold = refreshDaysRemaining < refreshWarnDays
+			}
+		}
+
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(map[string]interface{}{
+			payload := map[string]interface{}{
 				"profile":    profileName,
 				"auth_mode":  profile.AuthMode,
 				"tenant_id":  info.TenantID,
@@ -316,7 +359,16 @@ var authStatusCmd = &cobra.Command{
 				"expires_at": info.ExpiresAt,
 				"valid_for":  info.ValidFor,
 				"is_expired": info.IsExpired,
-			})
+			}
+			if haveCertExpiry {
+				payload["cert_expires_at"] = certExpiresAt
+				payload["cert_days_remaining"] = certDaysRemaining
+			}
+			if haveRefreshExpiry {
+				payload["refresh_expires_at"] = refreshExpiresAt
+				payload["refresh_days_remaining"] = refreshDaysRemaining
+			}
+			return output.JSON(payload)
 		case output.FormatPlain:
 			status := "valid"
 			if info.IsExpired {
@@ -325,6 +377,12 @@ var authStatusCmd = &cobra.Command{
 			output.Plain([][]string{
 				{profileName, string(profile.AuthMode), info.UPN, status, info.ValidFor},
 			})
+			if certWithinThreshold {
+				output.Warning(fmt.Sprintf("certificate expires in %d days (%s)", certDaysRemaining, certExpiresAt))
+			}
+			if refreshWithinThreshold {
+				output.Warning(fmt.Sprintf("refresh token may need re-login in %d days (%s)", refreshDaysRemaining, refreshExpiresAt))
+			}
 		default:
 			status := "✓ Valid"
 			if info.IsExpired {
@@ -342,9 +400,63 @@ var authStatusCmd = &cobra.Command{
 				fmt.Printf(" (%s remaining)", info.ValidFor)
 			}
 			fmt.Println()
+			if haveCertExpiry {
+				fmt.Printf("Cert exp:  %s (%d days remaining)\n", certExpiresAt, certDaysRemaining)
+			}
+			if haveRefreshExpiry {
+				fmt.Printf("Refresh:   %s (%d days remaining)\n", refreshExpiresAt, refreshDaysRemaining)
+			}
+			if certWithinThreshold {
+				fmt.Printf("⚠ Warning: certificate expires in %d days (%s)\n", certDaysRemaining, certExpiresAt)
+			}
+			if refreshWithinThreshold {
+				fmt.Printf("⚠ Warning: refresh token may need re-login in %d days (%s)\n", refreshDaysRemaining, refreshExpiresAt)
+			}
 		}
 		return nil
 	},
+}
+
+// envIntDefault returns the integer value of an environment variable, or def
+// when the variable is unset, empty, or not a non-negative integer.
+func envIntDefault(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return def
+}
+
+// parseCertNotAfter reads a PEM file (which may bundle a certificate and a
+// private key) and returns the NotAfter of the first CERTIFICATE block.
+func parseCertNotAfter(path string) (time.Time, error) {
+	data, err := os.ReadFile(path) // #nosec G304 - certificate path comes from the user profile config
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parseCertNotAfterBytes(data)
+}
+
+// parseCertNotAfterBytes parses the first CERTIFICATE block from PEM bytes and
+// returns its NotAfter. Private-key and other non-certificate blocks are skipped.
+func parseCertNotAfterBytes(pemData []byte) (time.Time, error) {
+	rest := pemData
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return time.Time{}, err
+			}
+			return cert.NotAfter, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("no CERTIFICATE block found")
 }
 
 // --- auth logout ---
@@ -483,6 +595,3 @@ func init() {
 	authCmd.AddCommand(authProfilesCmd)
 	authCmd.AddCommand(authUseCmd)
 }
-
-
-

@@ -63,6 +63,11 @@ func Error(msg string) {
 	fmt.Fprintf(os.Stderr, "✗ %s\n", msg)
 }
 
+// Warning prints a warning message to stderr, keeping stdout clean for --json/--plain
+func Warning(msg string) {
+	fmt.Fprintf(os.Stderr, "⚠ %s\n", msg)
+}
+
 // Info prints an info message to stderr
 func Info(msg string) {
 	fmt.Fprintf(os.Stderr, "→ %s\n", msg)
