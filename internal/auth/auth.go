@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"strings"
@@ -97,6 +97,7 @@ type TokenInfo struct {
 	AppName   string   `json:"app_name,omitempty"`
 	Scopes    []string `json:"scopes,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
+	IssuedAt  string   `json:"issued_at,omitempty"`
 	ValidFor  string   `json:"valid_for,omitempty"`
 	IsExpired bool     `json:"is_expired"`
 }
@@ -157,9 +158,12 @@ func DecodeTokenInfo(accessToken string) (*TokenInfo, error) {
 		}
 	}
 
+	if iat, ok := claims["iat"].(float64); ok {
+		info.IssuedAt = time.Unix(int64(iat), 0).Format(time.RFC3339)
+	}
+
 	return info, nil
 }
-
 
 // LoginAppOnly performs client credentials flow authentication (app-only).
 // The client secret is stored encrypted for unattended token refresh.
