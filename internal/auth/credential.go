@@ -8,25 +8,17 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	azcache "github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache"
 	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/graph"
 )
 
-// msalCache is a persistent MSAL token cache shared across credential instances.
-// It stores both access tokens (~60 min) and refresh tokens (~90 days) so that
-// delegated credentials can silently renew without user interaction.
+// msalCache is the MSAL token cache shared across credential instances. On
+// Linux and Windows the init in credential_cache_other.go sets it to a
+// persistent cache that stores access tokens (~60 min) and refresh tokens
+// (~90 days) so delegated credentials renew silently. On macOS the persistent
+// backend requires cgo, which release builds do not enable, so msalCache stays
+// zero-value and MSAL falls back to in-memory only.
 var msalCache azidentity.Cache
-
-func init() {
-	c, err := azcache.New(&azcache.Options{Name: "cb365"})
-	if err != nil {
-		// Cache will be zero-value; MSAL falls back to in-memory only.
-		// This is non-fatal — the user just won't get persistent refresh tokens.
-		return
-	}
-	msalCache = c
-}
 
 // DelegatedLoginResult holds the credential, token, and authentication record
 // from an interactive delegated login. The AuthRecord must be persisted so that
@@ -137,4 +129,3 @@ func GetTokenSilent(ctx context.Context, profile *config.Profile, authRecordJSON
 	}
 	return token, nil
 }
-
