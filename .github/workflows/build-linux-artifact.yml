@@ -1,0 +1,22 @@
+name: Build Linux Binary
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build linux/amd64
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o cb365 ./cmd/cb365
+      - name: Smoke test the binary
+        run: ./cb365 sp lists items create --help | grep -- --field-url
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cb365-linux-amd64
+          path: cb365
+          retention-days: 7
