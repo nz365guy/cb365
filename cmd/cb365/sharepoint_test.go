@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/microsoft/kiota-abstractions-go/serialization"
 )
 
 func TestSharepointCommandStructure(t *testing.T) {
@@ -134,3 +136,43 @@ func TestFormatSiteURL(t *testing.T) {
 	}
 }
 
+func TestSharepointListsItemsCreateHasFieldURL(t *testing.T) {
+	if sharepointListsItemsCreateCmd.Flags().Lookup("field-url") == nil {
+		t.Fatal("create missing --field-url")
+	}
+}
+
+func TestSharepointListsItemsUpdateHasFieldURL(t *testing.T) {
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("field-url") == nil {
+		t.Fatal("update missing --field-url")
+	}
+}
+
+func TestApplyURLFields(t *testing.T) {
+	fields := map[string]interface{}{}
+	if err := applyURLFields([]string{"LinkedIn=https://example.com/in/jane-doe"}, fields); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	obj, ok := fields["LinkedIn"].(*serialization.UntypedObject)
+	if !ok {
+		t.Fatalf("LinkedIn should be *serialization.UntypedObject, got %T", fields["LinkedIn"])
+	}
+	props := obj.GetValue()
+	urlNode, ok := props["Url"].(*serialization.UntypedString)
+	if !ok {
+		t.Fatalf("Url should be *serialization.UntypedString, got %T", props["Url"])
+	}
+	if v := urlNode.GetValue(); v == nil || *v != "https://example.com/in/jane-doe" {
+		t.Errorf("Url value = %v, want the supplied URL", v)
+	}
+	if _, ok := props["Description"].(*serialization.UntypedString); !ok {
+		t.Error("Description should be set")
+	}
+}
+
+func TestApplyURLFieldsRejectsMalformed(t *testing.T) {
+	fields := map[string]interface{}{}
+	if err := applyURLFields([]string{"NoEqualsSign"}, fields); err == nil {
+		t.Error("expected error for malformed field-url")
+	}
+}
