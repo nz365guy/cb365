@@ -8,12 +8,15 @@ import (
 	"strings"
 	"time"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
 	"github.com/microsoft/kiota-abstractions-go/serialization"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/sites"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
+
+const sharePointURLFieldPreferHeader = "apiversion=2.1"
 
 // ──────────────────────────────────────────────
 //  SharePoint helpers
@@ -48,6 +51,31 @@ func applyURLFields(fieldURLFlags []string, fields map[string]interface{}) error
 		})
 	}
 	return nil
+}
+
+func sharePointURLFieldHeaders(fieldURLFlags []string) *abstractions.RequestHeaders {
+	if len(fieldURLFlags) == 0 {
+		return nil
+	}
+	headers := abstractions.NewRequestHeaders()
+	headers.Add("Prefer", sharePointURLFieldPreferHeader)
+	return headers
+}
+
+func sharePointListItemCreateConfig(fieldURLFlags []string) *sites.ItemListsItemItemsRequestBuilderPostRequestConfiguration {
+	headers := sharePointURLFieldHeaders(fieldURLFlags)
+	if headers == nil {
+		return nil
+	}
+	return &sites.ItemListsItemItemsRequestBuilderPostRequestConfiguration{Headers: headers}
+}
+
+func sharePointListItemUpdateConfig(fieldURLFlags []string) *sites.ItemListsItemItemsItemFieldsRequestBuilderPatchRequestConfiguration {
+	headers := sharePointURLFieldHeaders(fieldURLFlags)
+	if headers == nil {
+		return nil
+	}
+	return &sites.ItemListsItemItemsItemFieldsRequestBuilderPatchRequestConfiguration{Headers: headers}
 }
 
 // ──────────────────────────────────────────────
@@ -408,7 +436,7 @@ Examples:
 		fieldSet.SetAdditionalData(fields)
 		item.SetFields(fieldSet)
 
-		created, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Post(ctx, item, nil)
+		created, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Post(ctx, item, sharePointListItemCreateConfig(fieldURLFlags))
 		if err != nil {
 			return fmt.Errorf("creating list item: %w", err)
 		}
@@ -487,7 +515,7 @@ Examples:
 		fieldSet := models.NewFieldValueSet()
 		fieldSet.SetAdditionalData(fields)
 
-		updated, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Fields().Patch(ctx, fieldSet, nil)
+		updated, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Fields().Patch(ctx, fieldSet, sharePointListItemUpdateConfig(fieldURLFlags))
 		if err != nil {
 			return fmt.Errorf("updating list item: %w", err)
 		}

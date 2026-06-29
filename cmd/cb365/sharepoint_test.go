@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
 	"github.com/microsoft/kiota-abstractions-go/serialization"
 )
 
@@ -175,4 +176,41 @@ func TestApplyURLFieldsRejectsMalformed(t *testing.T) {
 	if err := applyURLFields([]string{"NoEqualsSign"}, fields); err == nil {
 		t.Error("expected error for malformed field-url")
 	}
+}
+
+func TestSharePointURLFieldConfigsAddPreferHeader(t *testing.T) {
+	createConfig := sharePointListItemCreateConfig([]string{"Profile=https://example.com"})
+	if createConfig == nil {
+		t.Fatal("create config should be set when field-url is present")
+	}
+	assertPreferHeader(t, createConfig.Headers)
+
+	updateConfig := sharePointListItemUpdateConfig([]string{"Profile=https://example.com"})
+	if updateConfig == nil {
+		t.Fatal("update config should be set when field-url is present")
+	}
+	assertPreferHeader(t, updateConfig.Headers)
+}
+
+func TestSharePointURLFieldConfigsAreNilWithoutURLFields(t *testing.T) {
+	if config := sharePointListItemCreateConfig(nil); config != nil {
+		t.Fatal("create config should be nil without field-url values")
+	}
+	if config := sharePointListItemUpdateConfig(nil); config != nil {
+		t.Fatal("update config should be nil without field-url values")
+	}
+}
+
+func assertPreferHeader(t *testing.T, headers *abstractions.RequestHeaders) {
+	t.Helper()
+	if headers == nil {
+		t.Fatal("headers should be set")
+	}
+	values := headers.Get("Prefer")
+	for _, value := range values {
+		if value == sharePointURLFieldPreferHeader {
+			return
+		}
+	}
+	t.Fatalf("Prefer header = %v, want %q", values, sharePointURLFieldPreferHeader)
 }

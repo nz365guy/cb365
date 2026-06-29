@@ -283,14 +283,16 @@ Human-readable output goes to stderr. Machine-readable output (`--json`, `--plai
 | `cb365 sharepoint sites get --site ID` | Get site details |
 | `cb365 sharepoint lists list --site ID` | List lists in a site |
 | `cb365 sharepoint lists items list --site ID --list ID` | List items in a list |
-| `cb365 sharepoint lists items create --site ID --list ID --fields '{...}'` | Create a list item |
-| `cb365 sharepoint lists items update --site ID --list ID --item ID --fields '{...}'` | Update a list item |
+| `cb365 sharepoint lists items create --site ID --list ID --field Title="New Item"` | Create a list item |
+| `cb365 sharepoint lists items update --site ID --list ID --item ID --field Status="Complete"` | Update a list item |
 | `cb365 sharepoint lists items delete --site ID --list ID --item ID` | Delete a list item |
 | `cb365 sharepoint files list --site ID` | List files in default document library |
 | `cb365 sharepoint files get --site ID --item-id ID --output ./file` | Download a file |
 | `cb365 sharepoint files upload --site ID --file ./doc --path "/folder/doc"` | Upload a file |
 
 Alias: `cb365 sp` works in place of `cb365 sharepoint`.
+
+Use repeatable `--field Key=Value` flags for ordinary columns. For SharePoint Hyperlink (URL) columns, use repeatable `--field-url Key=URL`; cb365 sends the URL as the required `Url` and `Description` object for Microsoft Graph.
 
 ### OneDrive
 
