@@ -8,11 +8,15 @@ import (
 	"strings"
 	"time"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
+	"github.com/microsoft/kiota-abstractions-go/serialization"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/sites"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
+
+const sharePointURLFieldPreferHeader = "apiversion=2.1"
 
 // ──────────────────────────────────────────────
 //  SharePoint helpers
@@ -24,6 +28,54 @@ func formatSiteURL(webURL string) string {
 		return webURL
 	}
 	return "(unknown)"
+}
+
+// applyURLFields converts repeatable --field-url Key=URL flags into SharePoint
+// hyperlink field values and merges them into fields. A hyperlink (URL) column
+// expects an object with Url and Description rather than a plain string, so each
+// value is wrapped accordingly. Display text defaults to the URL itself.
+func applyURLFields(fieldURLFlags []string, fields map[string]interface{}) error {
+	for _, f := range fieldURLFlags {
+		parts := strings.SplitN(f, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid field-url format %q (expected Key=URL)", f)
+		}
+		key := strings.TrimSpace(parts[0])
+		if key == "" {
+			return fmt.Errorf("invalid field-url %q (key is empty)", f)
+		}
+		urlValue := parts[1]
+		fields[key] = serialization.NewUntypedObject(map[string]serialization.UntypedNodeable{
+			"Url":         serialization.NewUntypedString(urlValue),
+			"Description": serialization.NewUntypedString(urlValue),
+		})
+	}
+	return nil
+}
+
+func sharePointURLFieldHeaders(fieldURLFlags []string) *abstractions.RequestHeaders {
+	if len(fieldURLFlags) == 0 {
+		return nil
+	}
+	headers := abstractions.NewRequestHeaders()
+	headers.Add("Prefer", sharePointURLFieldPreferHeader)
+	return headers
+}
+
+func sharePointListItemCreateConfig(fieldURLFlags []string) *sites.ItemListsItemItemsRequestBuilderPostRequestConfiguration {
+	headers := sharePointURLFieldHeaders(fieldURLFlags)
+	if headers == nil {
+		return nil
+	}
+	return &sites.ItemListsItemItemsRequestBuilderPostRequestConfiguration{Headers: headers}
+}
+
+func sharePointListItemUpdateConfig(fieldURLFlags []string) *sites.ItemListsItemItemsItemFieldsRequestBuilderPatchRequestConfiguration {
+	headers := sharePointURLFieldHeaders(fieldURLFlags)
+	if headers == nil {
+		return nil
+	}
+	return &sites.ItemListsItemItemsItemFieldsRequestBuilderPatchRequestConfiguration{Headers: headers}
 }
 
 // ──────────────────────────────────────────────
@@ -337,11 +389,13 @@ var sharepointListsItemsCreateCmd = &cobra.Command{
 	Long: `Create a new item in a SharePoint list with field values.
 
 Examples:
-  cb365 sp lists items create --site SITE --list LIST --field Title="New Item" --field Status="Active"`,
+  cb365 sp lists items create --site SITE --list LIST --field Title="New Item" --field Status="Active"
+  cb365 sp lists items create --site SITE --list LIST --field Title="Jane Doe" --field-url Profile="https://example.com/in/jane-doe"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
 		fieldFlags, _ := cmd.Flags().GetStringSlice("field")
+		fieldURLFlags, _ := cmd.Flags().GetStringSlice("field-url")
 
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
@@ -349,8 +403,8 @@ Examples:
 		if listFlag == "" {
 			return fmt.Errorf("--list is required")
 		}
-		if len(fieldFlags) == 0 {
-			return fmt.Errorf("at least one --field is required (format: Key=Value)")
+		if len(fieldFlags) == 0 && len(fieldURLFlags) == 0 {
+			return fmt.Errorf("at least one --field or --field-url is required (format: Key=Value)")
 		}
 
 		fields := make(map[string]interface{})
@@ -360,6 +414,9 @@ Examples:
 				return fmt.Errorf("invalid field format %q — use Key=Value", f)
 			}
 			fields[parts[0]] = parts[1]
+		}
+		if err := applyURLFields(fieldURLFlags, fields); err != nil {
+			return err
 		}
 
 		client, err := newGraphClient()
@@ -379,7 +436,7 @@ Examples:
 		fieldSet.SetAdditionalData(fields)
 		item.SetFields(fieldSet)
 
-		created, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Post(ctx, item, nil)
+		created, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().Post(ctx, item, sharePointListItemCreateConfig(fieldURLFlags))
 		if err != nil {
 			return fmt.Errorf("creating list item: %w", err)
 		}
@@ -409,12 +466,14 @@ var sharepointListsItemsUpdateCmd = &cobra.Command{
 	Long: `Update field values on an existing SharePoint list item.
 
 Examples:
-  cb365 sp lists items update --site SITE --list LIST --item ITEM --field Status="Complete"`,
+  cb365 sp lists items update --site SITE --list LIST --item ITEM --field Status="Complete"
+  cb365 sp lists items update --site SITE --list LIST --item ITEM --field-url Profile="https://example.com/in/jane-doe"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
 		itemFlag, _ := cmd.Flags().GetString("item")
 		fieldFlags, _ := cmd.Flags().GetStringSlice("field")
+		fieldURLFlags, _ := cmd.Flags().GetStringSlice("field-url")
 
 		if siteFlag == "" {
 			return fmt.Errorf("--site is required")
@@ -425,8 +484,8 @@ Examples:
 		if itemFlag == "" {
 			return fmt.Errorf("--item is required")
 		}
-		if len(fieldFlags) == 0 {
-			return fmt.Errorf("at least one --field is required")
+		if len(fieldFlags) == 0 && len(fieldURLFlags) == 0 {
+			return fmt.Errorf("at least one --field or --field-url is required")
 		}
 
 		fields := make(map[string]interface{})
@@ -436,6 +495,9 @@ Examples:
 				return fmt.Errorf("invalid field format %q — use Key=Value", f)
 			}
 			fields[parts[0]] = parts[1]
+		}
+		if err := applyURLFields(fieldURLFlags, fields); err != nil {
+			return err
 		}
 
 		client, err := newGraphClient()
@@ -453,7 +515,7 @@ Examples:
 		fieldSet := models.NewFieldValueSet()
 		fieldSet.SetAdditionalData(fields)
 
-		updated, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Fields().Patch(ctx, fieldSet, nil)
+		updated, err := client.Sites().BySiteId(siteFlag).Lists().ByListId(listFlag).Items().ByListItemId(itemFlag).Fields().Patch(ctx, fieldSet, sharePointListItemUpdateConfig(fieldURLFlags))
 		if err != nil {
 			return fmt.Errorf("updating list item: %w", err)
 		}
@@ -817,12 +879,14 @@ func init() {
 	sharepointListsItemsCreateCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsCreateCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsCreateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
+	sharepointListsItemsCreateCmd.Flags().StringSlice("field-url", nil, "Hyperlink (URL) field value as Key=URL (repeatable)")
 	sharepointListsItemsCmd.AddCommand(sharepointListsItemsCreateCmd)
 
 	sharepointListsItemsUpdateCmd.Flags().String("site", "", "Site ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().String("list", "", "List ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().String("item", "", "Item ID (required)")
 	sharepointListsItemsUpdateCmd.Flags().StringSlice("field", nil, "Field value as Key=Value (repeatable)")
+	sharepointListsItemsUpdateCmd.Flags().StringSlice("field-url", nil, "Hyperlink (URL) field value as Key=URL (repeatable)")
 	sharepointListsItemsCmd.AddCommand(sharepointListsItemsUpdateCmd)
 
 	sharepointListsItemsDeleteCmd.Flags().String("site", "", "Site ID (required)")
@@ -854,4 +918,3 @@ func init() {
 	sharepointCmd.AddCommand(sharepointListsCmd)
 	sharepointCmd.AddCommand(sharepointFilesCmd)
 }
-
