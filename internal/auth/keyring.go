@@ -34,9 +34,9 @@ type tokenStore interface {
 }
 
 var (
-	storeOnce     sync.Once
-	activeStore   tokenStore
-	storeInitErr  error
+	storeOnce    sync.Once
+	activeStore  tokenStore
+	storeInitErr error
 )
 
 // getStore returns the active token store, initializing on first call.
@@ -161,4 +161,3 @@ func DeleteToken(profileName string) error {
 	}
 	return store.Delete(profileName)
 }
-
