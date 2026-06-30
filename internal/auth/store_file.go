@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	fileStoreName   = "tokens.enc"
-	pbkdf2Iter      = 210_000 // OWASP 2023 recommendation for SHA-256
-	pbkdf2KeyLen    = 32      // AES-256
-	saltLen         = 16
+	fileStoreName = "tokens.enc"
+	pbkdf2Iter    = 210_000 // OWASP 2023 recommendation for SHA-256
+	pbkdf2KeyLen  = 32      // AES-256
+	saltLen       = 16
 )
 
 // fileBackend stores encrypted tokens in ~/.config/cb365/tokens.enc
@@ -32,8 +32,8 @@ type fileBackend struct {
 
 // encryptedStore is the on-disk format
 type encryptedStore struct {
-	Salt    []byte            `json:"salt"`     // PBKDF2 salt (hex would also work but base64 via json is fine)
-	Entries map[string][]byte `json:"entries"`  // profile → AES-256-GCM ciphertext (nonce prepended)
+	Salt    []byte            `json:"salt"`    // PBKDF2 salt (hex would also work but base64 via json is fine)
+	Entries map[string][]byte `json:"entries"` // profile → AES-256-GCM ciphertext (nonce prepended)
 }
 
 // newFileStore creates an encrypted file token store.
@@ -196,4 +196,3 @@ func (f *fileBackend) Delete(profile string) error {
 	delete(store.Entries, profile)
 	return f.save(store)
 }
-
