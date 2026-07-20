@@ -1,0 +1,287 @@
+# Issue 23 delegated channel-message soft-delete threat model
+
+Status: security design complete; implementation blocked pending a dedicated
+delegated-cache delivery dependency.
+
+Source revision: `1871c14808741ad824e1e4f85177e82d4eaf7c0f`
+
+## Overview
+
+Issue 23 adds one destructive Microsoft Graph operation:
+
+```text
+cb365 teams channels delete-message \
+  --team <team> --channel <channel> --message <message> --confirm
+```
+
+The approved scope is a delegated work-or-school account soft-deleting its own
+Teams channel message. Chat messages, replies, batch deletion, permanent
+deletion, application permissions and service-principal deletion are out of
+scope.
+
+The Graph operation is `POST
+/teams/{team-id}/channels/{channel-id}/messages/{message-id}/softDelete`. It
+requires delegated `ChannelMessage.ReadWrite`; Microsoft documents application
+permission as unsupported. A successful operation returns HTTP 204.
+
+Relevant implementation evidence at the source revision:
+
+- `internal/auth/credential.go` uses Azure Identity device-code credentials,
+  authentication records and a persistent cache for delegated sessions.
+- `internal/auth/credential_cache_other.go` creates Azure Identity's local
+  persistent cache and otherwise falls back to memory.
+- `internal/auth/credential_cache_darwin.go` uses memory-only caching in release
+  builds.
+- `internal/auth/keyring.go` and `internal/auth/store_file.go` store profile
+  material in an OS keyring or a locally encrypted file. They are not a BWS EU
+  backing store for Azure Identity's delegated refresh cache.
+- `cmd/cb365/teams.go` already requires `--confirm` for channel-message sends,
+  but has no delete command.
+
+Mark's approval for issue 23 requires delegated refresh material to be stored
+only in Bitwarden Secrets Manager EU (BWS EU). The current cache path therefore
+does not satisfy the approved storage boundary. Mark subsequently limited issue
+20 to HTML-only delivery, so issue 20 is no longer the delegated-cache
+dependency. A separately tracked delegated-auth delivery item must establish
+and verify that boundary before issue 23 application code can be implemented.
+
+## Threat Model, Trust Boundaries, and Assumptions
+
+### Protected assets
+
+- Delegated refresh tokens and Azure Identity/MSAL cache state.
+- The runtime BWS credential used to retrieve or update that state.
+- Short-lived access tokens and authentication records.
+- Tenant, client and profile bindings that select an identity.
+- Team, channel and message identifiers selected for deletion.
+- The user's Teams channel messages and the integrity of other users' messages.
+- Audit evidence that records who requested which operation and its result,
+  without recording message content or credentials.
+
+### Actors and attacker capabilities
+
+- An authenticated delegated user operating the CLI legitimately.
+- An app-only profile or automation process that must never reach this
+  destructive endpoint.
+- A local same-user process able to invoke the CLI, alter arguments or inspect
+  ordinary process output.
+- An attacker who obtains a profile file, authentication record, local cache or
+  BWS bootstrap credential.
+- Microsoft Entra ID and Microsoft Graph, which are trusted to authenticate and
+  make the final authorisation decision.
+
+The design does not assume that possession of a local profile proves the human
+user's current intent, that a decoded token is authentic without verification,
+or that a timed-out POST did not reach Graph.
+
+### Trust boundaries
+
+1. Shell and CLI arguments into Cobra command parsing.
+2. Local profile metadata into delegated or app-only credential selection.
+3. The process boundary into BWS EU and back into process memory.
+4. BWS-backed cache state into Azure Identity/MSAL token acquisition.
+5. The CLI process into Microsoft Entra ID.
+6. The authenticated delegated identity into Microsoft Graph.
+7. Graph responses into human-readable output and structured audit events.
+
+### Security assumptions
+
+- BWS EU is already available and creates no new SaaS spend.
+- Its runtime credential is injected by the existing approved secret-delivery
+  path, is least-privileged to the cb365 token records, and is never persisted
+  in the repository, profile configuration, command line or logs.
+- Microsoft Graph remains the final authorisation authority. Client-side checks
+  are defence in depth and cannot widen Graph permissions.
+- `ChannelMessage.ReadWrite` is the exact destructive delegated permission.
+  Broader permissions such as `Group.ReadWrite.All` are not acceptable
+  substitutes.
+
+### Supported cache architecture constraint
+
+At the source revision, cb365 uses Azure Identity for Go v1.14.0 and its cache
+module v0.4.0. The public `azidentity.Cache` type is an alias with unexported
+state, and `azidentity/cache.New` constructs only the module's cross-platform
+local persistent cache. It does not provide a public external-store interface
+that can be implemented by a BWS adapter.
+
+The underlying MSAL Go public-client library does expose
+`cache.ExportReplace`, and `public.WithCache` accepts an externally managed
+cache. The next design phase must therefore either migrate the delegated
+device-code and silent-acquisition path to supported MSAL public-client APIs
+with a BWS-backed `ExportReplace` implementation, or document and prove another
+vendor-supported architecture that keeps all delegated refresh/cache material
+inside BWS EU. Copying private Azure Identity cache internals or scraping its
+local cache files is prohibited.
+
+## Required security invariants
+
+### Command and authorisation controls
+
+1. The command accepts one exact team, channel and root-message identifier.
+   Wildcards, lists, batches, chat-message IDs and reply IDs are rejected.
+2. Identifiers are non-empty, length-bounded and reject NUL, CR and LF. URL
+   construction uses the Graph SDK or escaped path-segment helpers rather than
+   raw string concatenation.
+3. `--confirm` is mandatory and binds the resolved profile, team, channel and
+   message IDs shown to the user. The command must not resolve a different
+   target after confirmation.
+4. `--dry-run` performs local validation and prints the bound target, but does
+   not construct a credential, acquire a token or make an HTTP request.
+5. App-only mode fails before Graph-client construction. Tests must prove that
+   app-only, unconfirmed and dry-run invocations make zero Entra ID and Graph
+   requests.
+6. The selected profile must be delegated and must request only the scopes
+   needed for the operation, including `ChannelMessage.ReadWrite`.
+
+### Ownership enforcement
+
+7. Before the POST, the command resolves `/me` and the target message with the
+   same delegated credential and compares the stable Entra user object ID with
+   `message.from.user.id`. Missing, application-authored or mismatched ownership
+   fails closed and makes no soft-delete POST.
+8. Unverified JWT claims, display names, email addresses and CLI-supplied owner
+   values are not ownership evidence.
+9. Graph remains the final enforcement point. HTTP 401, 403 and 404 responses
+   are failures and their bodies are not echoed if they could expose message
+   content or tenant details.
+
+The preflight is intentionally defence in depth. It introduces a time-of-check
+to time-of-use gap, so the command must still rely on Graph's authorisation and
+must not treat preflight success as authority to retry or target another object.
+
+### Token storage, refresh and revocation
+
+10. Delegated refresh/cache material for a delete-enabled profile is read from
+    and written to BWS EU only. Azure Identity's local persistent cache, the OS
+    keyring, the encrypted-file fallback and plaintext or environment-variable
+    token storage are prohibited for that material.
+11. Cache records are bound to tenant, client ID, account/home-account ID and
+    profile. A record for one binding must not be accepted for another.
+12. Refresh updates are serialised per profile and committed atomically. A
+    stale or concurrent writer must fail without overwriting newer cache state.
+    Newly returned refresh material is persisted before obsolete local state is
+    discarded.
+13. Tokens and BWS secret values exist only in process memory for the shortest
+    practical period and are never printed, included in errors or sent to audit
+    logs.
+14. Local logout deletes the BWS cache record, authentication record and any
+    legacy local cache for that profile, then verifies absence. A partial delete
+    fails visibly and does not report success.
+15. Local deletion is not described as server-side revocation. The runbook must
+    separately document Entra revocation/administrator sign-out for a lost or
+    compromised refresh token and explain that rotated refresh tokens can leave
+    older tokens valid until revoked or expired.
+
+### Request, retry and audit controls
+
+16. The soft-delete POST is issued exactly once after all local and ownership
+    checks pass. Generic HTTP retry middleware is disabled for this operation.
+17. HTTP 204 is success. A transport timeout or dropped response is an
+    ambiguous outcome: report that state and require a read-back check; do not
+    automatically repeat the POST.
+18. The audit event records timestamp, operation, tenant, profile identifier or
+    pseudonym, resolved team/channel/message IDs, result class, HTTP status and
+    Graph correlation ID when present. It never records token/cache material,
+    the BWS credential, message content, display names or response bodies.
+19. Audit failure is visible. It must not cause the command to repeat an
+    already-issued soft-delete request.
+
+## Attack Surface, Mitigations, and Attacker Stories
+
+### Attack surface and mitigations
+
+| Attack surface | Material threat | Required mitigation |
+| --- | --- | --- |
+| CLI arguments | Target substitution, newline/log injection, accidental destructive action | Strict validation, exact target binding, explicit confirmation, dry-run |
+| Profile selection | App-only or wrong-tenant credential reaches destructive code | Fail before client construction; bind cache to tenant/client/account/profile |
+| BWS boundary | Refresh-token or bootstrap-credential disclosure | Least privilege, memory-only secret handling, complete output/error redaction |
+| Cache refresh | Lost update reintroduces stale refresh material | Per-profile serialisation, atomic commit and stale-writer rejection |
+| Ownership preflight | Another user's or application-authored message is selected | Verified `/me` and message-author comparison; fail closed before POST |
+| Graph POST | Duplicate destructive request after ambiguous failure | Exactly-once invocation in-process; no automatic POST retries; read-back guidance |
+| Audit/output | Tokens or message content leave the process | Metadata-only schema and negative redaction tests |
+| Logout/revocation | Local logout leaves usable material behind | Delete and verify every cache layer; distinguish local deletion from Entra revocation |
+
+### Attacker stories
+
+1. A script selects an app-only profile and invokes delete with `--confirm`.
+   The command rejects it before any network request.
+2. A local attacker swaps a message ID after the prompt. The confirmed target
+   tuple is immutable, so the request cannot move to the substituted message.
+3. A delegated user targets another member's message. The stable object-ID
+   comparison fails and no soft-delete POST is made; Graph remains the final
+   backstop.
+4. A transport timeout occurs after Graph receives the POST. The CLI reports an
+   ambiguous result and does not retry, preventing an uncontrolled duplicate.
+5. Two processes refresh the same account concurrently. The stale writer is
+   rejected instead of overwriting the newer BWS cache record.
+6. A support bundle captures verbose logs. Negative tests ensure it contains no
+   access token, refresh/cache material, BWS value or message content.
+7. A compromised refresh token is removed locally. The operator is directed to
+   the distinct Entra revocation procedure rather than being given false
+   assurance that local deletion invalidated every server-side token.
+
+## Severity Calibration (Critical, High, Medium, Low)
+
+- **Critical:** access/refresh token or BWS bootstrap-credential disclosure;
+  app-only bypass that sends a destructive request; arbitrary deletion outside
+  the authenticated user's ownership; or addition of substantially broader
+  Graph permissions.
+- **High:** confirmation or dry-run bypass; cross-profile/tenant cache
+  confusion; stale refresh state overwriting a newer credential; ownership
+  preflight bypass; or logout silently retaining usable delegated cache state.
+- **Medium:** message content or identifiers exposed beyond the metadata audit
+  contract; blind retry after an ambiguous response; target-binding race; or
+  missing security audit evidence.
+- **Low:** overly detailed but non-secret errors, incomplete operator guidance,
+  or documentation drift that does not change the enforced control.
+
+## Pre-implementation delegated-cache security gate
+
+Issue 23 implementation remains **BLOCKED** until Tara links a dedicated
+delegated-auth delivery item and that item supplies all of the following
+evidence in a reviewed and merged change. Issue 20 cannot satisfy this gate
+because Mark selected HTML-only scope for that issue:
+
+1. A documented Azure Identity/MSAL cache architecture whose delegated
+   refresh/cache material is backed only by BWS EU for delete-enabled profiles.
+   It must reconcile the repository's current OS-keyring policy with Mark's
+   BWS-only approval, use a vendor-supported external-cache extension point,
+   and remove silent fallback to any unapproved persistent store.
+2. A versioned record schema binding tenant, client, home-account/profile and
+   cache payload, plus per-profile locking, atomic refresh rotation and
+   stale-writer rejection.
+3. A least-privilege runtime path for the BWS credential with no repository,
+   profile, command-line, environment-dump, output or log exposure.
+4. Login, silent-refresh, concurrent-refresh, expiry, BWS-unavailable, malformed
+   record, tenant mismatch, logout and legacy-cache migration tests. Failures
+   must fail closed and must not send a destructive Graph request.
+5. `auth status` evidence that reports the cache backend and freshness without
+   disclosing credential material.
+6. Logout evidence that removes and verifies BWS, authentication-record and
+   legacy cache state, plus an operator-tested Entra revocation runbook.
+7. A recording-transport security suite for issue 23 proving zero requests for
+   unconfirmed, dry-run and app-only paths; no POST on ownership or token
+   failure; exactly one POST on an authorised path; redaction; HTTP 204; safe
+   401/403/404 handling; and no automatic duplicate after a timeout.
+
+Meeting this gate authorises implementation review; it does not itself authorise
+tenant consent. Adding delegated `ChannelMessage.ReadWrite` requires its normal
+Microsoft Entra consent process and must not be applied as an unattended live
+auth mutation.
+
+## Primary references
+
+- [Microsoft Graph: soft-delete a chatMessage](https://learn.microsoft.com/en-us/graph/api/chatmessage-softdelete?view=graph-rest-1.0)
+- [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)
+- [Azure Identity for Go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity)
+- [Azure Identity cache module for Go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache)
+- [MSAL Go externally managed cache contract](https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache)
+- [MSAL Go public-client `WithCache`](https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go/apps/public#WithCache)
+- [Microsoft identity platform refresh tokens](https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens)
+- [Microsoft identity platform device-code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code)
+- [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/secrets-manager-cli/)
+- [Bitwarden Secrets Manager access tokens](https://bitwarden.com/help/access-tokens/)
+- [Issue 20 HTML-only scope decision](https://github.com/nz365guy/cb365/issues/20#issuecomment-5019321562)
+
+Repository: efbcc95779452b3966e309a5ff637d95d60e7eb112be891e7cebebabef81bafa
+Version: 1871c14808741ad824e1e4f85177e82d4eaf7c0f
