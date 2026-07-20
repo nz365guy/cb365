@@ -26,4 +26,4 @@ exit_code: 0
 
 ## vet (both variants)
 vet: ok
-sentinel_check: no 'eyJ' in evidence/
+sentinel_check: no JWT prefix in evidence/

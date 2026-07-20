@@ -7,8 +7,8 @@ cache. Design container: [cb365 #37](https://github.com/nz365guy/cb365/issues/37
 FAIL on either gate routes the work back to Design per ADR-0057 — the cache
 must not be split, truncated or compressed to force a fit.
 
-All evidence in this directory is size/digest/version only. The JWT sentinel
-scan (`grep -R 'eyJ'`) over these artefacts is enforced by
+All evidence in this directory is size/digest/version only. The JWT base64url
+prefix scan over these artefacts is enforced by
 `.github/workflows/spike-37.yml` and by `spike/build.sh`.
 
 ---

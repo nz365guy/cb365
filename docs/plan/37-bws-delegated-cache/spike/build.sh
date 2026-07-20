@@ -48,8 +48,9 @@ OUT="evidence/build-${HOST_TAG}.txt"
 } 2>&1 | tee "$OUT"
 
 # JWT sentinel must not appear anywhere in spike artefacts (issue #42 validation).
-if grep -R --binary-files=without-match -n 'eyJ' evidence/ ; then
-	echo "SENTINEL FAILURE: 'eyJ' found in evidence output" >&2
+sentinel='e''yJ'
+if grep -R --binary-files=without-match -n "$sentinel" evidence/ ; then
+	echo "SENTINEL FAILURE: JWT prefix found in evidence output" >&2
 	exit 1
 fi
-echo "sentinel_check: no 'eyJ' in evidence/" | tee -a "$OUT"
+echo "sentinel_check: no JWT prefix in evidence/" | tee -a "$OUT"

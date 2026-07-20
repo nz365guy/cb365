@@ -56,7 +56,8 @@ jobs:
       - name: JWT sentinel scan over spike artefacts
         working-directory: docs/plan/37-bws-delegated-cache
         run: |
-          if grep -R --binary-files=without-match -n 'eyJ' .; then
-            echo 'SENTINEL FAILURE: eyJ found in spike artefacts'; exit 1
+          sentinel='e''yJ'
+          if grep -R --binary-files=without-match -n "$sentinel" .; then
+            echo 'SENTINEL FAILURE: JWT prefix found in spike artefacts'; exit 1
           fi
           echo 'sentinel: clean'
