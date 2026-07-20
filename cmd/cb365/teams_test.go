@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 )
 
 // ──────────────────────────────────────────────
@@ -105,5 +107,66 @@ func TestTeamsAuditFooterExists(t *testing.T) {
 	}
 	if !strings.Contains(teamsAuditFooter, "cb365") {
 		t.Error("teamsAuditFooter must contain 'cb365' identifier")
+	}
+}
+
+// ──────────────────────────────────────────────
+//  --html flag tests (#20)
+// ──────────────────────────────────────────────
+
+func TestTeamsChannelSendHasHTMLFlag(t *testing.T) {
+	cmd := teamsChannelsSendCmd
+	htmlFlag := cmd.Flags().Lookup("html")
+	if htmlFlag == nil {
+		t.Fatal("teams channels send missing --html flag")
+	}
+	// Default text behaviour must remain unchanged
+	if htmlFlag.DefValue != "false" {
+		t.Errorf("--html default should be false, got %s", htmlFlag.DefValue)
+	}
+}
+
+func TestTeamsChatSendHasNoHTMLFlag(t *testing.T) {
+	// Scope guard: #20 approved --html for channel send only
+	cmd := teamsChatSendCmd
+	if cmd.Flags().Lookup("html") != nil {
+		t.Error("teams chat send must not have --html — scoped to channels send only")
+	}
+}
+
+func TestTeamsAuditFooterHTMLAttribution(t *testing.T) {
+	if teamsAuditFooterHTML == "" {
+		t.Fatal("teamsAuditFooterHTML must not be empty")
+	}
+	if !strings.Contains(teamsAuditFooterHTML, "cb365") {
+		t.Error("teamsAuditFooterHTML must contain 'cb365' identifier")
+	}
+	if !strings.Contains(teamsAuditFooterHTML, "<br>") {
+		t.Error("teamsAuditFooterHTML must use <br> — plain newlines do not render in HTML bodies")
+	}
+	// Both footers must carry the same visible attribution text
+	visible := strings.TrimSpace(teamsAuditFooter)
+	if !strings.Contains(teamsAuditFooterHTML, visible) {
+		t.Errorf("teamsAuditFooterHTML must contain the visible attribution %q", visible)
+	}
+}
+
+func TestTaggedTeamsBodyText(t *testing.T) {
+	content, contentType := taggedTeamsBody("hello", false)
+	if content != "hello"+teamsAuditFooter {
+		t.Errorf("text body should be body + teamsAuditFooter, got %q", content)
+	}
+	if contentType != models.TEXT_BODYTYPE {
+		t.Errorf("text mode should use TEXT_BODYTYPE, got %v", contentType)
+	}
+}
+
+func TestTaggedTeamsBodyHTML(t *testing.T) {
+	content, contentType := taggedTeamsBody("<b>hello</b>", true)
+	if content != "<b>hello</b>"+teamsAuditFooterHTML {
+		t.Errorf("HTML body should be body + teamsAuditFooterHTML, got %q", content)
+	}
+	if contentType != models.HTML_BODYTYPE {
+		t.Errorf("HTML mode should use HTML_BODYTYPE, got %v", contentType)
 	}
 }
