@@ -30,17 +30,36 @@ stored.
   limits the **EncString ciphertext representation**, not the plaintext; the
   effective plaintext limit is smaller (ciphertext is base64 + IV/MAC
   overhead, ≈ 3/4 × 35000 minus fixed overhead ≈ ~26 KB).
-- **Empirical verification (EU tenancy, throwaway record, non-secret filler):**
-  `spike/limit-probe.sh` binary-searches the largest accepted plaintext value.
-  Result: _pending — see `spike/evidence/bws-limit-probe.txt`_.
+- **Effective plaintext limit (analytic, from the pinned bound):** SM secret
+  values are encrypted as EncString type 2 (`AesCbc256_HmacSha256_B64`,
+  format `2.<b64 iv>|<b64 ct>|<b64 mac>`): fixed overhead 72 chars
+  (2 + 24 iv + 2 separators + 44 mac), ciphertext budget 34,928 base64 chars
+  → 26,196 ciphertext bytes → largest AES block multiple 26,192 → minus
+  mandatory PKCS7 padding byte = **26,191 plaintext bytes**.
+  ≥ 50% headroom therefore requires the envelope ≤ **13,095 bytes**.
+- **Empirical verification:** not run in this spike — no write-capable BWS
+  machine token exists outside root on the VM (operator decision 2026-07-21:
+  verify analytically now). `spike/limit-probe.sh` is committed for reuse.
+  Residual risk is closed by ADR-0057 itself: the first live envelope write
+  in cb365 #43 must be read back and digest-verified before any use, which
+  empirically confirms the limit before production rollout.
 
 ### Measurement
 
 Tool: `spike/cmd/measure` — MSAL Go public client (`public.WithCache`) with an
 in-memory `cache.ExportReplace` capture: one device-code login by the
-operator (Mark) against the approved test profile, then one silent
-acquisition (the steady-state refresh path). Cache bytes never touch disk,
-argv or output.
+operator (Mark), then one silent acquisition (the steady-state refresh
+path). Cache bytes never touch disk, argv or output.
+
+> **Recorded deviation (operator/owner decision, Mark, 2026-07-21):** no
+> dedicated test tenant exists; `cloverbase.com` resolves to the production
+> tenant. Mark explicitly waived the test-tenant boundary for this single
+> measurement login with his own account, on the basis that the tool holds
+> the cache in memory only and records sizes and digests exclusively. The
+> waiver applies to this measurement only; T1/T2 tenant evidence in #44
+> still requires the test-tenant procedure or a fresh recorded decision.
+> Scopes used: `.default` (matches cb365's `work-delegated` profile
+> behaviour, so the measured cache is representative of real usage).
 
 | Metric                                       | Value     |
 | -------------------------------------------- | --------- |
@@ -48,7 +67,7 @@ argv or output.
 | Raw cache SHA-256                             | _pending_ |
 | Base64 cache (chars)                          | _pending_ |
 | **ADR-0057 envelope (bytes)**                 | _pending_ |
-| Verified plaintext limit (bytes)              | _pending_ |
+| Verified plaintext limit (bytes)              | 26,191 (analytic, above) |
 | **Headroom** = (limit − envelope) / limit     | _pending_ |
 
 ### Verdict
