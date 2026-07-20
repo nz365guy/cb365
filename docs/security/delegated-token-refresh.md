@@ -13,7 +13,9 @@ Silent delegated refresh **already exists on `main`** — it shipped in
 `4e30eec feat(auth): MSAL persistent cache for delegated token auto-refresh`,
 with CAE alignment (`099c407`) and a macOS no-cgo fallback (`9068d62`, PR #31).
 This design documents that implementation, defines its required lifecycle
-controls, and identifies the gaps.
+controls, and identifies the gaps. The shipped storage is observed current
+state, not the approved target: delegated access and refresh material currently
+lives outside BWS EU and therefore does not satisfy the BWS-only secret rule.
 
 The refresh path:
 
@@ -22,7 +24,7 @@ The refresh path:
 3. On expiry, `GetTokenSilent` → `NewDelegatedCredentialSilent` rebuilds the credential from the stored record and redeems the **refresh token held inside the MSAL cache**. cb365 code never touches the refresh token directly.
 4. In unattended contexts the credential's `UserPrompt` returns an error, so a refresh that would need interaction **fails fast** instead of printing a device code nobody will see.
 
-### Two storage planes
+### Current storage planes
 
 | Plane | Contents | Backend |
 |-------|----------|---------|
@@ -32,18 +34,56 @@ The refresh path:
 Encrypted-file fallback: PBKDF2-SHA256, 210,000 iterations (OWASP 2023), AES-256-GCM,
 key derived from `CB365_KEYRING_PASSWORD`, atomic writes, `0600`/`0700` permissions.
 
+Both rows contain bearer credentials. OS keychains and the encrypted-file
+fallback reduce plaintext exposure, but they are not BWS EU and are therefore
+transitional for delegated profiles.
+
 ---
 
 ## 2. Approved Storage Pattern (AC 1)
 
-**Approved:** the existing two-plane pattern above. **No plaintext token file exists in any path.**
+**Approved target:** all delegated access-token and refresh/cache material is
+stored in **Bitwarden Secrets Manager EU**. No delegated bearer credential may
+fall back to the OS keychain, Azure Identity's local persistent cache, the
+encrypted-file store, a plaintext file or an environment variable.
+
+The supported design is an MSAL Go public client configured with
+`public.WithCache(cache.ExportReplace)`, backed by a BWS EU adapter. MSAL treats
+the exported cache as opaque and recommends one MSAL instance per user; cb365
+therefore uses one versioned BWS record per tenant, client ID,
+home-account/profile binding. Azure Identity's public `azidentity.Cache` cannot
+accept an external store, so copying private cache internals or scraping local
+cache files is prohibited.
 
 Rules:
 
-- **R1 — Passphrase sourcing.** On headless hosts (the openclaw VM), `CB365_KEYRING_PASSWORD` MUST be injected from **BWS EU** at runtime (the ADR-0042 pattern: BWS → tmpfs-backed env, never a plaintext `.env` or `.bashrc` on disk).
-- **R2 — No new services.** No paid secret-storage service is introduced; BWS EU is the already-approved manager.
-- **R3 — macOS limitation is accepted.** Release builds do not persist refresh tokens on macOS; silent refresh works only within a process lifetime there. Interactive re-login is the fallback. Revisit only if a macOS unattended use case appears.
-- **R4 — File permissions.** Encrypted-file store creates the directory `0700` and writes the file `0600` (re-applied on every save). Permissions are **not verified on load** — fail-closed checking is gap **G4** below.
+- **R1 — BWS-only delegated cache.** The opaque MSAL cache and any delegated
+  `TokenCache` bearer-token fields are stored in BWS EU. Non-secret profile and
+  authentication-record metadata may remain local only when it contains no
+  bearer credential.
+- **R2 — Least-privilege machine identity.** The BWS machine account has
+  read/write access only to the dedicated cb365 cache project or records. Its
+  bootstrap credential arrives through the existing approved runtime injection
+  path and is never placed in source, profile configuration, a command-line
+  argument, shell history or logs.
+- **R3 — No BWS client residue.** Prefer a supported in-process SDK. If the BWS
+  CLI is used, its authentication state is opted out or confined to an approved
+  volatile path; default persistent state is not accepted.
+- **R4 — Fail closed.** BWS unavailability, malformed cache data, a binding
+  mismatch or an export failure produces a non-zero error and no interactive
+  fallback, local-cache fallback or workload request.
+- **R5 — One writer per profile.** Until the chosen BWS interface supplies a
+  proven compare-and-swap primitive, a delegated profile is assigned to one
+  host and guarded by a per-profile process lock. Cross-host concurrent refresh
+  is unsupported. Every write includes a version, checks the prior revision and
+  is read back before success is reported.
+- **R6 — Migration is fail closed.** A migration copies and validates cache
+  state in BWS before deleting and verifying all legacy local delegated cache
+  layers. Partial migration is visible and cannot enable workload requests.
+- **R7 — No new services.** No paid secret-storage service is introduced; BWS
+  EU is the already-approved manager.
+- **R8 — App-only remains separate.** This item changes no app-only credential
+  behaviour or permission.
 
 ---
 
@@ -51,12 +91,13 @@ Rules:
 
 | Event | Behaviour | Where |
 |-------|-----------|-------|
-| **Rotation** | Refresh tokens are rotated by Entra ID on each redemption; MSAL handles this. cb365 never implements its own rotation and never reads the raw refresh token. | MSAL / `azidentity` |
-| **Access-token expiry** | ~60–90 min lifetime. `auth status` (and workload commands via silent credential) detect expiry and renew silently from the MSAL cache. | `cmd/cb365/auth.go` |
-| **Refresh-token expiry** | Sliding ~90-day inactivity window (tenant policy). `auth status` warns below `CB365_REFRESH_WARN_DAYS` (default 14) using an issued-at heuristic — documented as **approximate**, not authoritative. | `cmd/cb365/auth.go` |
+| **Rotation** | Entra can return replacement refresh material during redemption. MSAL handles the opaque cache update; the BWS `ExportReplace` adapter must persist and read back the new cache before cb365 reports success. Older server-side tokens are not assumed revoked. | MSAL + BWS adapter |
+| **Access-token expiry** | ~60–90 min lifetime. `auth status` (and workload commands via silent credential) detect expiry and renew silently from the BWS-backed MSAL cache. | `cmd/cb365/auth.go` + BWS adapter |
+| **Refresh-token expiry** | The Microsoft identity platform default is 90 days for this non-SPA flow, subject to tenant policy and earlier revocation. Redemption can return replacement refresh material without revoking the older token. `auth status` warns below `CB365_REFRESH_WARN_DAYS` (default 14) using an issued-at heuristic — documented as **approximate**, not authoritative. | `cmd/cb365/auth.go` |
 | **Revocation** | Admin revokes sessions in Entra → next refresh redemption fails. `GetTokenSilent` returns a clear "re-run `cb365 auth login`" error, non-zero exit, no retry loop. CAE (`EnableCAE: true`) additionally lets Entra invalidate live access tokens via claims challenge. | `internal/auth/credential.go` |
-| **Missing credential** | No stored `AuthenticationRecord` or empty cache → fail fast with an actionable error; never starts an interactive device-code prompt in an unattended context. | `internal/auth/credential.go` |
-| **Logout** | `auth logout` deletes the `TokenCache` entry and profile. **GAP G1: it does not clear the MSAL persistent cache**, so a valid refresh token survives logout until expiry/revocation. | `cmd/cb365/auth.go` |
+| **Missing credential / BWS unavailable** | No bound BWS record, an empty cache or an unavailable BWS service fails fast with an actionable error; unattended commands never start device code and never fall back locally. | BWS adapter + `internal/auth/credential.go` |
+| **Concurrent refresh** | One process/host holds the profile lock; a stale revision fails rather than overwriting newer cache state. | BWS adapter |
+| **Logout** | Target behaviour deletes and verifies the BWS cache record, local authentication record and every legacy delegated cache layer, then reports that Entra revocation is a separate operator action. **Current gap:** `auth logout` deletes only the cb365 `TokenCache` and profile, so the shipped MSAL refresh token survives. | `cmd/cb365/auth.go` + BWS adapter |
 
 ---
 
@@ -69,7 +110,8 @@ Rules:
 | `--verbose` prints refresh *status* only ("Token expired — refreshing…"), never token material | ✅ In place |
 | Errors wrap causes without embedding tokens | ✅ In place |
 | Delegated flow takes **no secret via flag or stdin** — device-code only, so no shell-history exposure exists for this flow | ✅ By design |
-| `CB365_KEYRING_PASSWORD` must come from BWS EU injection, not typed inline (inline `export` lands in shell history) | ⚠️ Operational rule R1 — verify on the VM |
+| Delegated bearer credentials never use `CB365_KEYRING_PASSWORD`, OS keychain or encrypted-file fallback | ⚠️ **GAP G1** — BWS-backed MSAL migration required |
+| BWS machine credential and client state are runtime-only and fully redacted | ⚠️ **GAP G1** — implement and verify with the adapter |
 | Azure SDK debug logging (`AZURE_SDK_GO_LOGGING`) must remain unset in agent environments; it can log HTTP traffic | ⚠️ **GAP G2** — add to ops checklist / env hardening |
 | CI: `gosec` (gating) on push/PR to `main`; CodeQL weekly | ✅ In place |
 | CI: `govulncheck` — runs but is `continue-on-error` pending Go 1.25.9 stdlib fixes (GO-2026-4601/4870/4946), so it does not currently gate | ⚠️ Gap **G5** |
@@ -84,24 +126,31 @@ JWT prefix `eyJ` outside approved stores.
 
 | # | Test | Steps | Pass criteria |
 |---|------|-------|---------------|
-| T1 | **Silent renewal after expiry** | Delegated login → wait out access-token lifetime (or shorten via tenant token-lifetime policy) → `cb365 auth status --verbose` | "refreshing via MSAL cache" then success; **zero interaction**; new expiry in output |
-| T2 | **Safe failure after revocation** | Revoke sessions (Entra portal or `Revoke-MgUserSignInSession`) → allow propagation → `cb365 auth status` | Non-zero exit; error instructs re-login; no token material in output |
-| T3 | **Missing credential** | `cb365 auth logout` (or delete keyring entry) → any workload command | Clear "run `cb365 auth login`" error; no interactive prompt hang in unattended mode |
-| T4 | **No leakage** | After T1–T3: grep shell history, cb365 output logs, `~/.config/cb365/` and process environment for `eyJ` | No token outside OS keychain / kernel keyring / `tokens.enc` |
+| T1 | **Silent renewal after expiry** | BWS-backed delegated login → wait out access-token lifetime → `cb365 auth status --verbose` | BWS-backed refresh succeeds with zero interaction; new expiry; record revision advances |
+| T2 | **Safe failure after revocation** | Revoke sessions in Entra → allow propagation → `cb365 auth status` | Non-zero exit; error instructs re-login/revocation handling; no retry loop or token material |
+| T3 | **Missing/unavailable BWS** | Remove access to the bound record and separately make BWS unavailable → any unattended workload command | Clear non-zero error; zero Entra/workload requests; no device prompt or local fallback |
+| T4 | **No leakage or residue** | After T1–T3, inspect history, output, logs, process environment, BWS client state and legacy cb365/MSAL stores | No delegated bearer token or cache outside the bound BWS EU record; no unmanaged BWS state |
+| T5 | **Concurrent refresh** | Start two refreshes for one profile and attempt a stale revision write | One writer succeeds; the stale writer fails without overwriting the newer BWS record |
+| T6 | **Migration and logout** | Migrate a legacy test profile, then log out | BWS read-back succeeds before legacy deletion; logout verifies BWS and every legacy cache layer absent |
 
-T1/T2 are manual with recorded evidence (they need a live tenant); T3/T4 are
-scriptable and belong in `test/integration/` once an implementation item is approved.
+T1/T2 require a test-tenant operator and recorded evidence. T3–T6 are
+automatable and belong in `test/integration/` under a separately approved
+implementation item.
 
 ---
 
 ## 6. Decisions Required / Recorded (AC 5)
 
-- **ADR: yes.** The credential-storage direction (two-plane MSAL cache + keyring/encrypted-file, BWS EU passphrase sourcing, macOS in-memory limitation) should be recorded as an ADR in `cloverbase-dept-10-technology` so it binds future work.
+- **ADR: yes.** The BWS EU-backed MSAL external-cache direction, identity
+  binding, one-writer constraint, migration, revocation and no-fallback rule
+  should be recorded in `cloverbase-dept-10-technology` before implementation.
 - **Separate implementation items: yes.** This document authorises none of them:
-  - **G1** — clear the MSAL persistent cache entry on `auth logout` (refresh token must not survive logout).
+  - **G1** — implement the BWS EU `cache.ExportReplace` adapter, migrate
+    delegated profiles, remove delegated local-cache fallback and make logout
+    clear and verify BWS plus legacy cache state.
   - **G2** — environment hardening: assert `AZURE_SDK_GO_LOGGING` unset in agent/VM profiles; add to ops checklist.
-  - **G3** — automate T3/T4 in `test/integration/`; record T1/T2 evidence on #37.
-  - **G4** — verify token-store file/directory permissions on load and fail closed on unexpected modes (today they are only set at creation/save).
+  - **G3** — automate T3–T6 in `test/integration/`; record T1/T2 evidence on #37.
+  - **G4** — verify legacy token-store file/directory permissions during migration and fail closed on unexpected modes before reading them.
   - **G5** — restore `govulncheck` as a gating CI check once setup-go ships Go >= 1.25.9 (tracked by the TODO in `.github/workflows/ci.yml`).
 
 ## 7. Explicitly Out of Scope
@@ -109,3 +158,11 @@ scriptable and belong in `test/integration/` once an implementation item is appr
 - Any change to app-only authentication (unchanged by design).
 - Teams `--html` rendering (delivered separately under #20).
 - New storage services or plaintext token files (prohibited).
+
+## 8. Primary References
+
+- [MSAL Go externally managed cache contract](https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache)
+- [MSAL Go public-client `WithCache`](https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go/apps/public#WithCache)
+- [Microsoft identity platform refresh tokens](https://learn.microsoft.com/en-us/entra/identity-platform/refresh-tokens)
+- [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/secrets-manager-cli/)
+- [Bitwarden Secrets Manager machine accounts and access tokens](https://bitwarden.com/help/secrets-manager-quick-start/)
