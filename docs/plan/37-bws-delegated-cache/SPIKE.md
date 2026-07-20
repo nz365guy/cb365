@@ -61,19 +61,40 @@ path). Cache bytes never touch disk, argv or output.
 > Scopes used: `.default` (matches cb365's `work-delegated` profile
 > behaviour, so the measured cache is representative of real usage).
 
+Run 2026-07-21 (NZT) on the OpenClaw VM by Mark (operator): device-code
+login, `.default` scopes, one export observed (the post-login cache write;
+the subsequent silent acquisition was served from the in-memory cache and
+correctly triggered no further export).
+
 | Metric                                       | Value     |
 | -------------------------------------------- | --------- |
-| Raw exported cache (bytes)                    | _pending_ |
-| Raw cache SHA-256                             | _pending_ |
-| Base64 cache (chars)                          | _pending_ |
-| **ADR-0057 envelope (bytes)**                 | _pending_ |
+| Raw exported cache (bytes)                    | 10,194    |
+| Raw cache SHA-256                             | `eb14f1383ccd9660ca351dd285f0133cd1f7973384f3696bad260c0ad5284288` |
+| Base64 cache (chars)                          | 13,592    |
+| **ADR-0057 envelope (bytes)**                 | **14,043** |
 | Verified plaintext limit (bytes)              | 26,191 (analytic, above) |
-| **Headroom** = (limit − envelope) / limit     | _pending_ |
+| 50%-headroom ceiling (bytes)                  | 13,095    |
+| **Headroom** = (limit − envelope) / limit     | **46.4%** |
 
 ### Verdict
 
-**Gate 1: PENDING** — requires the operator-assisted test-tenant login and
-the approved throwaway BWS record (see issue #42 blocked handoff).
+**Gate 1: FAIL** (2026-07-21). The representative envelope (14,043 bytes)
+fits the verified limit but exceeds the ≥50% headroom ceiling of 13,095
+bytes by 948 bytes — headroom is 46.4%. Per ADR-0057 and issue #42 this
+routes the delegated-cache work back to **Design**: the cache must not be
+silently split, truncated or compressed to force a fit. Notes for Design:
+
+- The base64 encoding of the opaque cache is the dominant cost
+  (+3,398 bytes, 33% over raw); envelope metadata is only 451 bytes.
+- The measurement used a production account with full `.default` consented
+  scopes — deliberately representative of real usage rather than a minimal
+  test-tenant token; slimmer scope sets would measure smaller but would not
+  reflect the deployed profile.
+- The gap is small (envelope is 53.6% of the limit vs the required ≤50%),
+  so plausible Design responses include revisiting the headroom margin with
+  measured growth data, an envelope format without base64 inflation, or a
+  documented multi-record contract — all of which are ADR-level decisions,
+  not spike scope.
 
 ---
 
@@ -129,7 +150,11 @@ the Go checksum database; the native artefact digest is recorded above.
 
 ## Handoff
 
-- PASS + PASS → unblocks the G1 provider implementation item
-  ([cb365 #43](https://github.com/nz365guy/cb365/issues/43)).
-- Any FAIL → back to Design per ADR-0057; comment on #37 and #42 with the
-  failing numbers.
+**Outcome: Gate 1 FAIL / Gate 2 PASS → back to Design per ADR-0057.**
+
+- The G1 provider implementation ([cb365 #43](https://github.com/nz365guy/cb365/issues/43))
+  must not start until a superseding Design decision resolves the headroom
+  shortfall.
+- Gate 2's evidence (pinned SDK, both build variants, licence/provenance)
+  remains valid and carries forward to whatever Design decides.
+- Failing numbers commented on #37 and #42.
