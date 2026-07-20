@@ -24,6 +24,30 @@ import (
 // communication from human interaction.
 const teamsAuditFooter = "\n\n[Sent via cb365]"
 
+// teamsAuditFooterHTML is the HTML equivalent of teamsAuditFooter, used when
+// a message is sent with --html. Same visible text — plain newlines do not
+// render as line breaks in HTML bodies, so <br> is required.
+const teamsAuditFooterHTML = "<br><br>[Sent via cb365]"
+
+// taggedTeamsBody appends the audit footer to body and returns the tagged
+// content plus the Graph body type for the requested rendering mode.
+func taggedTeamsBody(body string, html bool) (string, models.BodyType) {
+	if html {
+		return body + teamsAuditFooterHTML, models.HTML_BODYTYPE
+	}
+	return body + teamsAuditFooter, models.TEXT_BODYTYPE
+}
+
+// htmlBodyGuard rejects HTML bodies that could swallow the appended audit
+// footer: an unterminated <!-- consumes everything after it when the message
+// is parsed as HTML, hiding the attribution.
+func htmlBodyGuard(body string) error {
+	if strings.Contains(body, "<!--") {
+		return fmt.Errorf("--html body must not contain HTML comments (<!--) — they can hide the audit footer")
+	}
+	return nil
+}
+
 // ──────────────────────────────────────────────
 //  Teams helpers
 // ──────────────────────────────────────────────
@@ -172,12 +196,18 @@ var teamsChannelsSendCmd = &cobra.Command{
 	Short: "Send a message to a Teams channel",
 	Long: `Send a message to a Teams channel.
 
+By default the body is sent as plain text. Pass --html to send the body as
+HTML (Teams supports a limited HTML subset: p, br, b, i, a, ul/ol/li,
+blockquote, pre, code, img, and simple tables). HTML comments (<!--) are
+rejected because they can hide the appended audit footer.
+
 Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		teamFlag, _ := cmd.Flags().GetString("team")
 		channelFlag, _ := cmd.Flags().GetString("channel")
 		bodyFlag, _ := cmd.Flags().GetString("body")
 		confirmFlag, _ := cmd.Flags().GetBool("confirm")
+		htmlFlag, _ := cmd.Flags().GetBool("html")
 
 		if teamFlag == "" {
 			return fmt.Errorf("--team is required")
@@ -187,6 +217,11 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 		}
 		if bodyFlag == "" {
 			return fmt.Errorf("--body is required")
+		}
+		if htmlFlag {
+			if err := htmlBodyGuard(bodyFlag); err != nil {
+				return err
+			}
 		}
 
 		// Safety: require --confirm for channel posts
@@ -219,16 +254,19 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 		}
 
 		if flagDryRun {
-			output.Info(fmt.Sprintf("[DRY RUN] Would send message to #%s in %s (%d chars)", channelName, teamName, len(bodyFlag)))
+			if htmlFlag {
+				output.Info(fmt.Sprintf("[DRY RUN] Would send HTML message to #%s in %s (%d chars)", channelName, teamName, len(bodyFlag)))
+			} else {
+				output.Info(fmt.Sprintf("[DRY RUN] Would send message to #%s in %s (%d chars)", channelName, teamName, len(bodyFlag)))
+			}
 			return nil
 		}
 
 		// Audit & Identity: tag all agent-generated messages with disclaimer
-		taggedBody := bodyFlag + teamsAuditFooter
+		taggedBody, contentType := taggedTeamsBody(bodyFlag, htmlFlag)
 
 		msg := models.NewChatMessage()
 		body := models.NewItemBody()
-		contentType := models.TEXT_BODYTYPE
 		body.SetContentType(&contentType)
 		body.SetContent(&taggedBody)
 		msg.SetBody(body)
@@ -373,12 +411,12 @@ var teamsChatSendCmd = &cobra.Command{
 			return nil
 		}
 
-		// Audit & Identity: tag all agent-generated messages with disclaimer
-		taggedBody := bodyFlag + teamsAuditFooter
+		// Audit & Identity: tag all agent-generated messages with disclaimer.
+		// Chat send is text-only by design — --html is scoped to channel send (#20).
+		taggedBody, contentType := taggedTeamsBody(bodyFlag, false)
 
 		msg := models.NewChatMessage()
 		body := models.NewItemBody()
-		contentType := models.TEXT_BODYTYPE
 		body.SetContentType(&contentType)
 		body.SetContent(&taggedBody)
 		msg.SetBody(body)
@@ -418,6 +456,7 @@ func init() {
 	teamsChannelsSendCmd.Flags().String("team", "", "Team name or ID (required)")
 	teamsChannelsSendCmd.Flags().String("channel", "", "Channel name or ID (required)")
 	teamsChannelsSendCmd.Flags().String("body", "", "Message body text (required)")
+	teamsChannelsSendCmd.Flags().Bool("html", false, "Send body as HTML instead of plain text")
 	teamsChannelsSendCmd.Flags().Bool("confirm", false, "Confirm sending to channel (required safety flag)")
 	teamsChannelsCmd.AddCommand(teamsChannelsSendCmd)
 

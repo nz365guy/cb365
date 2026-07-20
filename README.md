@@ -271,7 +271,7 @@ Human-readable output goes to stderr. Machine-readable output (`--json`, `--plai
 | Command | Description |
 |---------|-------------|
 | `cb365 teams channels list --team "Name"` | List channels in a team |
-| `cb365 teams channels send --team "Name" --channel "General" --body "..." --confirm` | Post to a channel |
+| `cb365 teams channels send --team "Name" --channel "General" --body "..." [--html] --confirm` | Post to a channel (optionally as HTML) |
 | `cb365 teams chat list` | List 1:1 and group chats |
 | `cb365 teams chat send --chat ID --body "..."` | Send a chat message |
 
