@@ -43,7 +43,7 @@ Rules:
 - **R1 — Passphrase sourcing.** On headless hosts (the openclaw VM), `CB365_KEYRING_PASSWORD` MUST be injected from **BWS EU** at runtime (the ADR-0042 pattern: BWS → tmpfs-backed env, never a plaintext `.env` or `.bashrc` on disk).
 - **R2 — No new services.** No paid secret-storage service is introduced; BWS EU is the already-approved manager.
 - **R3 — macOS limitation is accepted.** Release builds do not persist refresh tokens on macOS; silent refresh works only within a process lifetime there. Interactive re-login is the fallback. Revisit only if a macOS unattended use case appears.
-- **R4 — File permissions.** Encrypted-file store keeps `0600` file / `0700` directory; any change fails closed.
+- **R4 — File permissions.** Encrypted-file store creates the directory `0700` and writes the file `0600` (re-applied on every save). Permissions are **not verified on load** — fail-closed checking is gap **G4** below.
 
 ---
 
@@ -71,7 +71,8 @@ Rules:
 | Delegated flow takes **no secret via flag or stdin** — device-code only, so no shell-history exposure exists for this flow | ✅ By design |
 | `CB365_KEYRING_PASSWORD` must come from BWS EU injection, not typed inline (inline `export` lands in shell history) | ⚠️ Operational rule R1 — verify on the VM |
 | Azure SDK debug logging (`AZURE_SDK_GO_LOGGING`) must remain unset in agent environments; it can log HTTP traffic | ⚠️ **GAP G2** — add to ops checklist / env hardening |
-| CI: `gosec` + `govulncheck` on every commit; CodeQL weekly | ✅ In place |
+| CI: `gosec` (gating) on push/PR to `main`; CodeQL weekly | ✅ In place |
+| CI: `govulncheck` — runs but is `continue-on-error` pending Go 1.25.9 stdlib fixes (GO-2026-4601/4870/4946), so it does not currently gate | ⚠️ Gap **G5** |
 
 ---
 
@@ -100,6 +101,8 @@ scriptable and belong in `test/integration/` once an implementation item is appr
   - **G1** — clear the MSAL persistent cache entry on `auth logout` (refresh token must not survive logout).
   - **G2** — environment hardening: assert `AZURE_SDK_GO_LOGGING` unset in agent/VM profiles; add to ops checklist.
   - **G3** — automate T3/T4 in `test/integration/`; record T1/T2 evidence on #37.
+  - **G4** — verify token-store file/directory permissions on load and fail closed on unexpected modes (today they are only set at creation/save).
+  - **G5** — restore `govulncheck` as a gating CI check once setup-go ships Go >= 1.25.9 (tracked by the TODO in `.github/workflows/ci.yml`).
 
 ## 7. Explicitly Out of Scope
 
