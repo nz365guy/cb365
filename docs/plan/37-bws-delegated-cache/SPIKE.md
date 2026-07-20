@@ -74,7 +74,7 @@ a `CGO_ENABLED=0` build compiling the fail-closed unavailable-provider stub.
 | Module hash (go.sum) | `h1:DtgklUXNA3GcP5t1eXEEefd0UY6Gv5041/+gZHD2174=` |
 | go.mod hash (go.sum) | `h1:6Sfb4IdZ9tnggeFj8Ty4MLkWUyC2pNlFUoAZE0Dapfw=` |
 | Native artefact | `internal/cinterface/lib/linux-x64/libbitwarden_c.a`, **vendored inside the Go module** (statically linked; covered by the module hash above and verified by `go mod verify` against the Go checksum database) |
-| `libbitwarden_c.a` SHA-256 (linux-x64) | _recorded in `spike/evidence/build-linux-openclaw-vm.txt`_ |
+| `libbitwarden_c.a` SHA-256 (linux-x64) | `bbdc2dc8c59659bc8cfc7e4a1d86bcae3f4b9be739411ff25056f99c9fa4ef31` |
 | Licence | Bitwarden Software Development Kit License Agreement, Version 1 (2023-03-17) — permits use for developing applications that interoperate with Bitwarden services, which is exactly this use. **Not an OSI licence**; noted for SBOM/licence review in the implementation item. |
 | Provenance | Fetched via `proxy.golang.org`, validated against `sum.golang.org` (`go mod verify`); upstream source `github.com/bitwarden/sdk-go` (mirrors `bitwarden/sdk-sm` languages/go). |
 | MSAL (measurement + adapter interface) | `github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2` (matches cb365's existing indirect pin) |
@@ -99,7 +99,12 @@ target (Linux OpenClaw VM, x86-64) is covered.
 
 ### Verdict
 
-**Gate 2: PENDING** — filled from the VM evidence run.
+**Gate 2: PASS** (2026-07-21, VM evidence run above). The pinned SDK v2.1.0
+builds and statically links on the Linux OpenClaw VM toolchain with plain
+glibc GCC 13.3 (musl not required); the FFI client constructs and closes
+cleanly; the `CGO_ENABLED=0` stub compiles and fails closed with the exact
+ADR-0057 error string. Checksums are pinned via go.sum and verified against
+the Go checksum database; the native artefact digest is recorded above.
 
 ---
 
