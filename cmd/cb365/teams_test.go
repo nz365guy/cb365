@@ -170,3 +170,16 @@ func TestTaggedTeamsBodyHTML(t *testing.T) {
 		t.Errorf("HTML mode should use HTML_BODYTYPE, got %v", contentType)
 	}
 }
+
+func TestHTMLBodyGuardRejectsComments(t *testing.T) {
+	// An unterminated <!-- swallows the appended audit footer when the body
+	// is parsed as HTML, so comment openers must be rejected.
+	if err := htmlBodyGuard("hidden <!--"); err == nil {
+		t.Fatal("HTML body containing <!-- must be rejected")
+	} else if !strings.Contains(err.Error(), "audit footer") {
+		t.Errorf("rejection should explain the audit-footer risk, got: %v", err)
+	}
+	if err := htmlBodyGuard("<b>fine</b>"); err != nil {
+		t.Errorf("clean HTML body should pass, got: %v", err)
+	}
+}

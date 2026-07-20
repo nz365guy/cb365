@@ -38,6 +38,16 @@ func taggedTeamsBody(body string, html bool) (string, models.BodyType) {
 	return body + teamsAuditFooter, models.TEXT_BODYTYPE
 }
 
+// htmlBodyGuard rejects HTML bodies that could swallow the appended audit
+// footer: an unterminated <!-- consumes everything after it when the message
+// is parsed as HTML, hiding the attribution.
+func htmlBodyGuard(body string) error {
+	if strings.Contains(body, "<!--") {
+		return fmt.Errorf("--html body must not contain HTML comments (<!--) — they can hide the audit footer")
+	}
+	return nil
+}
+
 // ──────────────────────────────────────────────
 //  Teams helpers
 // ──────────────────────────────────────────────
@@ -188,7 +198,8 @@ var teamsChannelsSendCmd = &cobra.Command{
 
 By default the body is sent as plain text. Pass --html to send the body as
 HTML (Teams supports a limited HTML subset: p, br, b, i, a, ul/ol/li,
-blockquote, pre, code, img, and simple tables).
+blockquote, pre, code, img, and simple tables). HTML comments (<!--) are
+rejected because they can hide the appended audit footer.
 
 Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -206,6 +217,11 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 		}
 		if bodyFlag == "" {
 			return fmt.Errorf("--body is required")
+		}
+		if htmlFlag {
+			if err := htmlBodyGuard(bodyFlag); err != nil {
+				return err
+			}
 		}
 
 		// Safety: require --confirm for channel posts
