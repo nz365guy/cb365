@@ -24,6 +24,13 @@ The Graph operation is `POST
 requires delegated `ChannelMessage.ReadWrite`; Microsoft documents application
 permission as unsupported. A successful operation returns HTTP 204.
 
+Microsoft documents a different, broader delegated permission for reading a
+channel message: `ChannelMessage.Read.All` (or the legacy `Group.Read.All` /
+`Group.ReadWrite.All` alternatives). The delete design must not add one of
+those permissions solely to perform an ownership pre-read. Own-message
+enforcement is therefore a separate provenance gate, defined below, rather
+than an assumed `/me` plus message-GET preflight.
+
 Relevant implementation evidence at the source revision:
 
 - `internal/auth/credential.go` uses Azure Identity device-code credentials,
@@ -90,11 +97,15 @@ or that a timed-out POST did not reach Graph.
 - Its runtime credential is injected by the existing approved secret-delivery
   path, is least-privileged to the cb365 token records, and is never persisted
   in the repository, profile configuration, command line or logs.
+- If the BWS CLI is used, its own authentication state is disabled or confined
+  to an approved volatile path; the default persistent state directory is not
+  silently accepted. A direct supported SDK is preferred over parsing secret
+  values from child-process output.
 - Microsoft Graph remains the final authorisation authority. Client-side checks
   are defence in depth and cannot widen Graph permissions.
 - `ChannelMessage.ReadWrite` is the exact destructive delegated permission.
-  Broader permissions such as `Group.ReadWrite.All` are not acceptable
-  substitutes.
+  `ChannelMessage.Read.All`, `Group.Read.All` and `Group.ReadWrite.All` are not
+  acceptable additions solely to inspect the target before deletion.
 
 ### Supported cache architecture constraint
 
@@ -135,55 +146,67 @@ local cache files is prohibited.
 
 ### Ownership enforcement
 
-7. Before the POST, the command resolves `/me` and the target message with the
-   same delegated credential and compares the stable Entra user object ID with
-   `message.from.user.id`. Missing, application-authored or mismatched ownership
-   fails closed and makes no soft-delete POST.
-8. Unverified JWT claims, display names, email addresses and CLI-supplied owner
-   values are not ownership evidence.
-9. Graph remains the final enforcement point. HTTP 401, 403 and 404 responses
-   are failures and their bodies are not echoed if they could expose message
-   content or tenant details.
-
-The preflight is intentionally defence in depth. It introduces a time-of-check
-to time-of-use gap, so the command must still rely on Graph's authorisation and
-must not treat preflight success as authority to retry or target another object.
+7. A user-supplied message ID is not proof that the authenticated user authored
+   the message. Before implementation, the delegated-auth delivery item must
+   establish one supported own-message proof that does not add
+   `ChannelMessage.Read.All` or either legacy Group permission merely for a
+   pre-read. The preferred design limits deletion to message IDs recorded when
+   cb365 successfully sent the message, bound to the same tenant, client,
+   home-account/profile, team and channel in an integrity-protected provenance
+   record.
+8. If a vendor-documented author lookup becomes available under the already
+   approved permissions, it may replace provenance only after a test-tenant
+   proof. `/me` plus a channel-message GET is not assumed to work: `/me`
+   requires `User.Read`, while Microsoft currently documents channel-message
+   GET with `ChannelMessage.Read.All` rather than `ChannelMessage.ReadWrite`.
+9. Missing, application-authored, cross-profile, cross-tenant or mismatched
+   provenance fails closed before the soft-delete POST. Unverified JWT claims,
+   display names, email addresses and CLI-supplied owner values are not
+   ownership evidence.
+10. Graph remains the final enforcement point. HTTP 401, 403 and 404 responses
+    are failures and their bodies are not echoed if they could expose message
+    content or tenant details. A provenance match never authorises a retry or a
+    different target.
 
 ### Token storage, refresh and revocation
 
-10. Delegated refresh/cache material for a delete-enabled profile is read from
+11. Delegated refresh/cache material for a delete-enabled profile is read from
     and written to BWS EU only. Azure Identity's local persistent cache, the OS
     keyring, the encrypted-file fallback and plaintext or environment-variable
     token storage are prohibited for that material.
-11. Cache records are bound to tenant, client ID, account/home-account ID and
+12. Cache records are bound to tenant, client ID, account/home-account ID and
     profile. A record for one binding must not be accepted for another.
-12. Refresh updates are serialised per profile and committed atomically. A
+13. Refresh updates are serialised per profile and committed atomically. A
     stale or concurrent writer must fail without overwriting newer cache state.
     Newly returned refresh material is persisted before obsolete local state is
     discarded.
-13. Tokens and BWS secret values exist only in process memory for the shortest
+14. Tokens and BWS secret values exist only in process memory for the shortest
     practical period and are never printed, included in errors or sent to audit
     logs.
-14. Local logout deletes the BWS cache record, authentication record and any
+15. The BWS machine account has read/write access only to the dedicated cb365
+    cache project or records. BWS client authentication state is opted out or
+    held on an approved volatile filesystem and is covered by the same
+    redaction tests as the delegated cache.
+16. Local logout deletes the BWS cache record, authentication record and any
     legacy local cache for that profile, then verifies absence. A partial delete
     fails visibly and does not report success.
-15. Local deletion is not described as server-side revocation. The runbook must
+17. Local deletion is not described as server-side revocation. The runbook must
     separately document Entra revocation/administrator sign-out for a lost or
     compromised refresh token and explain that rotated refresh tokens can leave
     older tokens valid until revoked or expired.
 
 ### Request, retry and audit controls
 
-16. The soft-delete POST is issued exactly once after all local and ownership
+18. The soft-delete POST is issued exactly once after all local and ownership
     checks pass. Generic HTTP retry middleware is disabled for this operation.
-17. HTTP 204 is success. A transport timeout or dropped response is an
+19. HTTP 204 is success. A transport timeout or dropped response is an
     ambiguous outcome: report that state and require a read-back check; do not
     automatically repeat the POST.
-18. The audit event records timestamp, operation, tenant, profile identifier or
+20. The audit event records timestamp, operation, tenant, profile identifier or
     pseudonym, resolved team/channel/message IDs, result class, HTTP status and
     Graph correlation ID when present. It never records token/cache material,
     the BWS credential, message content, display names or response bodies.
-19. Audit failure is visible. It must not cause the command to repeat an
+21. Audit failure is visible. It must not cause the command to repeat an
     already-issued soft-delete request.
 
 ## Attack Surface, Mitigations, and Attacker Stories
@@ -196,7 +219,7 @@ must not treat preflight success as authority to retry or target another object.
 | Profile selection | App-only or wrong-tenant credential reaches destructive code | Fail before client construction; bind cache to tenant/client/account/profile |
 | BWS boundary | Refresh-token or bootstrap-credential disclosure | Least privilege, memory-only secret handling, complete output/error redaction |
 | Cache refresh | Lost update reintroduces stale refresh material | Per-profile serialisation, atomic commit and stale-writer rejection |
-| Ownership preflight | Another user's or application-authored message is selected | Verified `/me` and message-author comparison; fail closed before POST |
+| Ownership/provenance | Another user's, another profile's or application-authored message is selected | Integrity-protected cb365 send provenance under the same identity and target binding; no permission widening for a pre-read |
 | Graph POST | Duplicate destructive request after ambiguous failure | Exactly-once invocation in-process; no automatic POST retries; read-back guidance |
 | Audit/output | Tokens or message content leave the process | Metadata-only schema and negative redaction tests |
 | Logout/revocation | Local logout leaves usable material behind | Delete and verify every cache layer; distinguish local deletion from Entra revocation |
@@ -207,9 +230,9 @@ must not treat preflight success as authority to retry or target another object.
    The command rejects it before any network request.
 2. A local attacker swaps a message ID after the prompt. The confirmed target
    tuple is immutable, so the request cannot move to the substituted message.
-3. A delegated user targets another member's message. The stable object-ID
-   comparison fails and no soft-delete POST is made; Graph remains the final
-   backstop.
+3. A delegated user targets another member's message or a message absent from
+   the same-profile cb365 send provenance. The command fails before the POST;
+   Graph remains the final backstop for every accepted target.
 4. A transport timeout occurs after Graph receives the POST. The CLI reports an
    ambiguous result and does not retry, preventing an uncontrolled duplicate.
 5. Two processes refresh the same account concurrently. The stale writer is
@@ -228,7 +251,7 @@ must not treat preflight success as authority to retry or target another object.
   Graph permissions.
 - **High:** confirmation or dry-run bypass; cross-profile/tenant cache
   confusion; stale refresh state overwriting a newer credential; ownership
-  preflight bypass; or logout silently retaining usable delegated cache state.
+  provenance bypass; or logout silently retaining usable delegated cache state.
 - **Medium:** message content or identifiers exposed beyond the metadata audit
   contract; blind retry after an ambiguous response; target-binding race; or
   missing security audit evidence.
@@ -246,7 +269,8 @@ because Mark selected HTML-only scope for that issue:
    refresh/cache material is backed only by BWS EU for delete-enabled profiles.
    It must reconcile the repository's current OS-keyring policy with Mark's
    BWS-only approval, use a vendor-supported external-cache extension point,
-   and remove silent fallback to any unapproved persistent store.
+   remove silent fallback to any unapproved persistent store, and prevent the
+   BWS client from creating an unmanaged persistent authentication state file.
 2. A versioned record schema binding tenant, client, home-account/profile and
    cache payload, plus per-profile locking, atomic refresh rotation and
    stale-writer rejection.
@@ -259,8 +283,14 @@ because Mark selected HTML-only scope for that issue:
    disclosing credential material.
 6. Logout evidence that removes and verifies BWS, authentication-record and
    legacy cache state, plus an operator-tested Entra revocation runbook.
-7. A recording-transport security suite for issue 23 proving zero requests for
-   unconfirmed, dry-run and app-only paths; no POST on ownership or token
+7. An own-message proof compatible with the exact approved Graph permission.
+   Prefer an integrity-protected record created from cb365's successful send
+   response and bound to tenant, client, home-account/profile, team, channel and
+   message. Do not add `ChannelMessage.Read.All` or legacy Group permissions
+   solely for ownership inspection. Test both an ordinary member and a team
+   owner under the applicable Teams messaging policy.
+8. A recording-transport security suite for issue 23 proving zero requests for
+   unconfirmed, dry-run and app-only paths; no POST on provenance or token
    failure; exactly one POST on an authorised path; redaction; HTTP 204; safe
    401/403/404 handling; and no automatic duplicate after a timeout.
 
@@ -272,7 +302,9 @@ auth mutation.
 ## Primary references
 
 - [Microsoft Graph: soft-delete a chatMessage](https://learn.microsoft.com/en-us/graph/api/chatmessage-softdelete?view=graph-rest-1.0)
+- [Microsoft Graph: get a channel chatMessage](https://learn.microsoft.com/en-us/graph/api/chatmessage-get?view=graph-rest-1.0)
 - [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)
+- [Microsoft Teams messaging policies](https://learn.microsoft.com/en-us/microsoftteams/messaging-policies-in-teams)
 - [Azure Identity for Go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity)
 - [Azure Identity cache module for Go](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache)
 - [MSAL Go externally managed cache contract](https://pkg.go.dev/github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache)
