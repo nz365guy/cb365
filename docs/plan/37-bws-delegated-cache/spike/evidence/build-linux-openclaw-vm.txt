@@ -1,0 +1,29 @@
+# Gate 2 build evidence — cb365 #42 / ADR-0057
+date_utc: 2026-07-20T20:19:38Z
+host: Linux 6.17.0-1018-azure x86_64
+go: go version go1.25.0 linux/amd64
+cc: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+
+## Pinned dependencies (go.sum)
+all modules verified
+github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2 h1:RHK7bS+HQMslb1sZpAokUt+zTVmue0hKSs2C791hhzU=
+github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
+github.com/bitwarden/sdk-go/v2 v2.1.0 h1:DtgklUXNA3GcP5t1eXEEefd0UY6Gv5041/+gZHD2174=
+github.com/bitwarden/sdk-go/v2 v2.1.0/go.mod h1:6Sfb4IdZ9tnggeFj8Ty4MLkWUyC2pNlFUoAZE0Dapfw=
+
+## Native artefact digest (statically linked by cgo build)
+bbdc2dc8c59659bc8cfc7e4a1d86bcae3f4b9be739411ff25056f99c9fa4ef31  /home/mark/go/pkg/mod/github.com/bitwarden/sdk-go/v2@v2.1.0/internal/cinterface/lib/linux-x64/libbitwarden_c.a
+
+## Variant 1: CGO_ENABLED=1 (managed provider must construct)
+cgo_provider_available: true
+provider_construct: ok (SDK client constructed and closed; no network, no secret access)
+exit_code: 0
+
+## Variant 2: CGO_ENABLED=0 (fail-closed stub must compile and refuse)
+cgo_provider_available: false
+provider_construct: refused (managed delegated authentication unavailable on this build)
+exit_code: 0
+
+## vet (both variants)
+vet: ok
+sentinel_check: no JWT prefix in evidence/
