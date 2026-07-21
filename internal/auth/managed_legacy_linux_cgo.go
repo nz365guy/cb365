@@ -199,7 +199,7 @@ func acquireLegacyAzureIdentityLocks(cacheFiles []string) ([]*os.File, error) {
 		if err := verifyOwnedFile(lock, 0600); err != nil {
 			return nil, cleanupLegacyAzureIdentityLocks(locks, lock, err)
 		}
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if err := flockManagedFile(lock, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 			primary := managedError(ManagedCacheUnavailable, "acquire legacy Azure Identity cache lock", err)
 			if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 				primary = managedError(ManagedCacheConflict, "acquire legacy Azure Identity cache lock", err)
@@ -236,7 +236,7 @@ func releaseLegacyAzureIdentityLocks(locks []*os.File, remove bool) error {
 				firstErr = managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache lock", err)
 			}
 		}
-		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil && firstErr == nil {
+		if err := flockManagedFile(lock, syscall.LOCK_UN); err != nil && firstErr == nil {
 			firstErr = managedError(ManagedCacheUnavailable, "release legacy Azure Identity cache lock", err)
 		}
 		if err := lock.Close(); err != nil && firstErr == nil {

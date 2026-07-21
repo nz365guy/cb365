@@ -54,7 +54,7 @@ func acquireManagedProfileLock(profile, host string) (*managedProfileLock, error
 	if err := verifyOwnedFile(file, 0600); err != nil {
 		return closeOnError(err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flockManagedFile(file, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return closeOnError(managedError(ManagedCacheConflict, "acquire managed cache lock", err))
 		}
@@ -63,17 +63,17 @@ func acquireManagedProfileLock(profile, host string) (*managedProfileLock, error
 
 	start, err := linuxProcessStart(os.Getpid())
 	if err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = flockManagedFile(file, syscall.LOCK_UN)
 		return closeOnError(managedError(ManagedCacheUnavailable, "read managed cache lock owner", err))
 	}
 	if err := refuseLiveUnlockedOwner(file, host, start); err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = flockManagedFile(file, syscall.LOCK_UN)
 		return closeOnError(err)
 	}
 	metadata := managedLockMetadata{Profile: profile, Host: host, PID: os.Getpid(), ProcessStart: start}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = flockManagedFile(file, syscall.LOCK_UN)
 		return closeOnError(managedError(ManagedCacheUnavailable, "encode managed cache lock owner", err))
 	}
 	if err := file.Truncate(0); err == nil {
@@ -86,7 +86,7 @@ func acquireManagedProfileLock(profile, host string) (*managedProfileLock, error
 		err = file.Sync()
 	}
 	if err != nil {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = flockManagedFile(file, syscall.LOCK_UN)
 		return closeOnError(managedError(ManagedCacheUnavailable, "record managed cache lock owner", err))
 	}
 	return &managedProfileLock{file: file}, nil
@@ -96,7 +96,7 @@ func (l *managedProfileLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
-	unlockErr := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	unlockErr := flockManagedFile(l.file, syscall.LOCK_UN)
 	closeErr := l.file.Close()
 	if unlockErr != nil {
 		return managedError(ManagedCacheUnavailable, "release managed cache lock", unlockErr)
@@ -105,6 +105,15 @@ func (l *managedProfileLock) Close() error {
 		return managedError(ManagedCacheUnavailable, "close managed cache lock", closeErr)
 	}
 	return nil
+}
+
+func flockManagedFile(file *os.File, operation int) error {
+	fd := file.Fd()
+	maxInt := uintptr(^uint(0) >> 1)
+	if fd > maxInt {
+		return managedError(ManagedCacheUnavailable, "validate managed cache lock descriptor", nil)
+	}
+	return syscall.Flock(int(fd), operation) // #nosec G115 -- descriptor range is checked before conversion
 }
 
 func managedRuntimeDir() (string, error) {
