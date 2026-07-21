@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const legacyAzureIdentityCacheName = "cb365"
+var legacyAzureIdentityCacheNames = []string{"cb365", "cb365.cae"}
 
 // legacyDelegatedState contains only the non-secret account binding and the
 // already-verified locations that must be removed after the BWS record has
@@ -39,7 +39,15 @@ func inspectLegacyDelegated(profile *config.Profile) (*legacyDelegatedState, err
 	if err := verifyLegacyTokenStorePermissions(store, true); err != nil {
 		return nil, err
 	}
-	if _, err := verifyLegacyAzureIdentityCache(true); err != nil {
+	cacheFiles, err := verifyLegacyAzureIdentityCache(true)
+	if err != nil {
+		return nil, err
+	}
+	locks, err := acquireLegacyAzureIdentityLocks(cacheFiles)
+	if err != nil {
+		return nil, err
+	}
+	if err := releaseLegacyAzureIdentityLocks(locks, true); err != nil {
 		return nil, err
 	}
 
@@ -90,11 +98,16 @@ func cleanupLegacyDelegated(profileName string) error {
 		return managedError(ManagedCacheConflict, "verify legacy delegated token deletion", nil)
 	}
 
-	cacheFile, err := verifyLegacyAzureIdentityCache(false)
+	cacheFiles, err := verifyLegacyAzureIdentityCache(false)
 	if err != nil {
 		return err
 	}
-	if cacheFile != "" {
+	locks, err := acquireLegacyAzureIdentityLocks(cacheFiles)
+	if err != nil {
+		return err
+	}
+	defer releaseLegacyAzureIdentityLocks(locks, false)
+	for _, cacheFile := range cacheFiles {
 		if err := os.Remove(cacheFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache file", err)
 		}
@@ -102,6 +115,10 @@ func cleanupLegacyDelegated(profileName string) error {
 			return managedError(ManagedCacheConflict, "verify legacy Azure Identity cache file deletion", nil)
 		}
 	}
+	if err := releaseLegacyAzureIdentityLocks(locks, true); err != nil {
+		return err
+	}
+	locks = nil
 	if err := deleteLegacyAzureIdentityKey(); err != nil {
 		return err
 	}
@@ -125,27 +142,103 @@ func verifyLegacyTokenStorePermissions(store tokenStore, required bool) error {
 // verifyLegacyAzureIdentityCache returns the deterministic encrypted cache
 // path used by azidentity/cache v0.4.0 on Linux. The cache is never opened or
 // parsed here; its owner and modes are checked before any migration read.
-func verifyLegacyAzureIdentityCache(required bool) (string, error) {
+func verifyLegacyAzureIdentityCache(required bool) ([]string, error) {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", managedError(ManagedCacheUnavailable, "resolve legacy Azure Identity cache directory", err)
+			return nil, managedError(ManagedCacheUnavailable, "resolve legacy Azure Identity cache directory", err)
 		}
 		base = filepath.Join(home, ".cache")
 	}
 	if !filepath.IsAbs(base) {
-		return "", managedError(ManagedCacheInvalid, "validate legacy Azure Identity cache directory", nil)
+		return nil, managedError(ManagedCacheInvalid, "validate legacy Azure Identity cache directory", nil)
 	}
 	dir := filepath.Join(base, ".IdentityService")
-	file := filepath.Join(dir, legacyAzureIdentityCacheName)
 	if err := verifyOptionalOwnedPath(dir, true, 0700, required); err != nil {
-		return "", err
+		return nil, err
 	}
-	if err := verifyOptionalOwnedPath(file, false, 0600, required); err != nil {
-		return "", err
+	files := make([]string, 0, len(legacyAzureIdentityCacheNames))
+	found := 0
+	for _, name := range legacyAzureIdentityCacheNames {
+		file := filepath.Join(dir, name)
+		if _, err := os.Lstat(file); err == nil {
+			found++
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, managedError(ManagedCacheUnavailable, "inspect legacy delegated cache path", err)
+		}
+		if err := verifyOptionalOwnedPath(file, false, 0600, false); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
 	}
-	return file, nil
+	if required && found == 0 {
+		return nil, managedError(ManagedCacheUnavailable, "locate legacy Azure Identity cache", os.ErrNotExist)
+	}
+	return files, nil
+}
+
+func acquireLegacyAzureIdentityLocks(cacheFiles []string) ([]*os.File, error) {
+	if len(cacheFiles) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Dir(cacheFiles[0])
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, managedError(ManagedCacheUnavailable, "inspect legacy Azure Identity lock directory", err)
+	}
+	locks := make([]*os.File, 0, len(cacheFiles))
+	for _, cacheFile := range cacheFiles {
+		lockPath := cacheFile + ".lockfile"
+		lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_CLOEXEC, 0600) // #nosec G304 -- derived from verified cache directory
+		if err != nil {
+			releaseLegacyAzureIdentityLocks(locks, false)
+			return nil, managedError(ManagedCacheUnavailable, "open legacy Azure Identity cache lock", err)
+		}
+		if err := verifyOwnedFile(lock, 0600); err != nil {
+			_ = lock.Close()
+			releaseLegacyAzureIdentityLocks(locks, false)
+			return nil, err
+		}
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			_ = lock.Close()
+			releaseLegacyAzureIdentityLocks(locks, false)
+			if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+				return nil, managedError(ManagedCacheConflict, "acquire legacy Azure Identity cache lock", err)
+			}
+			return nil, managedError(ManagedCacheUnavailable, "acquire legacy Azure Identity cache lock", err)
+		}
+		locks = append(locks, lock)
+	}
+	return locks, nil
+}
+
+func releaseLegacyAzureIdentityLocks(locks []*os.File, remove bool) error {
+	var firstErr error
+	for _, lock := range locks {
+		if lock == nil {
+			continue
+		}
+		path := lock.Name()
+		if remove {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+				firstErr = managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache lock", err)
+			}
+		}
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil && firstErr == nil {
+			firstErr = managedError(ManagedCacheUnavailable, "release legacy Azure Identity cache lock", err)
+		}
+		if err := lock.Close(); err != nil && firstErr == nil {
+			firstErr = managedError(ManagedCacheUnavailable, "close legacy Azure Identity cache lock", err)
+		}
+		if remove {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+				firstErr = managedError(ManagedCacheConflict, "verify legacy Azure Identity cache lock deletion", nil)
+			}
+		}
+	}
+	return firstErr
 }
 
 func verifyOptionalOwnedPath(path string, directory bool, mode os.FileMode, required bool) error {
@@ -176,24 +269,32 @@ func deleteLegacyAzureIdentityKey() error {
 	}
 	rings := []int{userRing}
 	if persistentRing, persistentErr := unix.KeyctlInt(unix.KEYCTL_GET_PERSISTENT, -1, userRing, 0, 0); persistentErr == nil && persistentRing != userRing {
-		rings = append(rings, persistentRing)
+		// Search is recursive. Remove from the persistent child first so a
+		// search through the user ring cannot repeatedly find a key that isn't
+		// directly linked there.
+		rings = []int{persistentRing, userRing}
 	}
+	for _, name := range legacyAzureIdentityCacheNames {
 	for _, ring := range rings {
 		for {
-			keyID, searchErr := unix.KeyctlSearch(ring, "user", legacyAzureIdentityCacheName, 0)
+			keyID, searchErr := unix.KeyctlSearch(ring, "user", name, 0)
 			if searchErr != nil {
 				if isLegacyKeyAbsent(searchErr) {
 					break
 				}
 				return managedError(ManagedCacheUnavailable, "locate legacy Azure Identity cache key", searchErr)
 			}
-			if _, unlinkErr := unix.KeyctlInt(unix.KEYCTL_UNLINK, keyID, ring, 0, 0); unlinkErr != nil && !isLegacyKeyAbsent(unlinkErr) {
+			if _, unlinkErr := unix.KeyctlInt(unix.KEYCTL_UNLINK, keyID, ring, 0, 0); unlinkErr != nil {
+				if isLegacyKeyAbsent(unlinkErr) {
+					break
+				}
 				return managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache key", unlinkErr)
 			}
 		}
-		if _, searchErr := unix.KeyctlSearch(ring, "user", legacyAzureIdentityCacheName, 0); !isLegacyKeyAbsent(searchErr) {
+		if _, searchErr := unix.KeyctlSearch(ring, "user", name, 0); !isLegacyKeyAbsent(searchErr) {
 			return managedError(ManagedCacheConflict, "verify legacy Azure Identity cache key deletion", nil)
 		}
+	}
 	}
 	return nil
 }

@@ -19,12 +19,12 @@ func TestLegacyCachePermissionsAreCheckedBeforeMigration(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(dir, legacyAzureIdentityCacheName)
+	file := filepath.Join(dir, legacyAzureIdentityCacheNames[1])
 	if err := os.WriteFile(file, []byte("encrypted fixture, never parsed"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := verifyLegacyAzureIdentityCache(true); err != nil || got != file {
-		t.Fatalf("valid legacy cache rejected: path=%q err=%v", got, err)
+	if got, err := verifyLegacyAzureIdentityCache(true); err != nil || len(got) != 2 || got[1] != file {
+		t.Fatalf("valid legacy cache rejected: paths=%q err=%v", got, err)
 	}
 	if err := os.Chmod(file, 0644); err != nil {
 		t.Fatal(err)
