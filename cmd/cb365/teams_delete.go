@@ -368,6 +368,10 @@ func appendTeamsDeleteAudit(event teamsDeleteAuditEvent) error {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return err
 	}
+	directoryInfo, err := os.Lstat(directory)
+	if err != nil || directoryInfo.Mode()&os.ModeSymlink != 0 || !directoryInfo.IsDir() || directoryInfo.Mode().Perm() != 0700 {
+		return errors.New("unsafe cb365 audit directory")
+	}
 	path := filepath.Join(directory, "teams-delete-audit.jsonl")
 	if info, statErr := os.Lstat(path); statErr == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
@@ -382,7 +386,9 @@ func appendTeamsDeleteAudit(event teamsDeleteAuditEvent) error {
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+	pathInfo, pathErr := os.Lstat(path)
+	if err != nil || pathErr != nil || pathInfo.Mode()&os.ModeSymlink != 0 ||
+		!info.Mode().IsRegular() || info.Mode().Perm() != 0600 || !os.SameFile(info, pathInfo) {
 		return errors.New("unsafe Teams delete audit file")
 	}
 	encoded, err := json.Marshal(event)

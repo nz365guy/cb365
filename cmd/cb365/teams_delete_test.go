@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -300,5 +302,59 @@ func TestTeamsDeleteCommandContract(t *testing.T) {
 	}
 	if teamsChannelsDeleteMessageCmd.Flags().Lookup("confirm").DefValue != "false" {
 		t.Fatal("delete-message --confirm must default false")
+	}
+}
+
+func TestAppendTeamsDeleteAuditUsesPrivateMetadataOnlyFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	event := teamsDeleteAuditEvent{
+		Timestamp:   "2026-07-21T11:00:00Z",
+		Operation:   teamsDeleteOperation,
+		TenantID:    "tenant",
+		Profile:     "sha256:profile",
+		TeamID:      validTeamsDeleteTarget.TeamID,
+		ChannelID:   validTeamsDeleteTarget.ChannelID,
+		MessageID:   validTeamsDeleteTarget.MessageID,
+		ResultClass: "success",
+		HTTPStatus:  http.StatusNoContent,
+	}
+	if err := appendTeamsDeleteAudit(event); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".config", config.AppName, "teams-delete-audit.jsonl")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("audit mode = %o", info.Mode().Perm())
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed test path under t.TempDir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "opaque-token-sentinel") || strings.Contains(string(data), "message body") {
+		t.Fatalf("audit contains protected content: %s", data)
+	}
+	var decoded teamsDeleteAuditEvent
+	if err := json.Unmarshal(data, &decoded); err != nil || decoded != event {
+		t.Fatalf("audit round trip: decoded=%+v err=%v", decoded, err)
+	}
+}
+
+func TestAppendTeamsDeleteAuditRejectsUnsafeFileMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	directory := filepath.Join(home, ".config", config.AppName)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "teams-delete-audit.jsonl")
+	if err := os.WriteFile(path, []byte("unsafe\n"), 0644); err != nil { // #nosec G306 -- intentionally unsafe negative-test fixture
+		t.Fatal(err)
+	}
+	if err := appendTeamsDeleteAudit(teamsDeleteAuditEvent{ResultClass: "test"}); err == nil {
+		t.Fatal("mode-0644 audit file was accepted")
 	}
 }

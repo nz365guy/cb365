@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const managedChannelMessageProvenanceSchema = "cb365.teams-channel-message-provenance/v1"
@@ -23,7 +24,7 @@ type ManagedChannelMessageTarget struct {
 
 func (t ManagedChannelMessageTarget) valid() bool {
 	for _, value := range []string{t.TeamID, t.ChannelID, t.MessageID} {
-		if value == "" || len(value) > 512 || strings.ContainsAny(value, "\x00\r\n") {
+		if value == "" || len(value) > 512 || strings.IndexFunc(value, unicode.IsControl) >= 0 {
 			return false
 		}
 	}

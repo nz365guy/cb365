@@ -379,7 +379,7 @@ cb365 auth login \
 
 ## Safety Rules
 
-cb365 has 44 safety rules hardcoded in Go. They cannot be bypassed by configuration, environment variables, or prompt injection. Here are the key patterns:
+cb365 has hardcoded safety rules in Go. They cannot be bypassed by configuration, environment variables, or prompt injection. Here are the key patterns:
 
 ### Write Protection
 
