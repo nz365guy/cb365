@@ -1,7 +1,7 @@
 # Issue 23 delegated channel-message soft-delete threat model
 
-Status: security design complete; implementation blocked pending a dedicated
-delegated-cache delivery dependency.
+Status: security design implemented in PR #55; release remains gated by the
+owner-assisted #44 T1/T2 and test-tenant soft-delete evidence.
 
 Source revision: `1871c14808741ad824e1e4f85177e82d4eaf7c0f`
 
@@ -18,6 +18,13 @@ The approved scope is a delegated work-or-school account soft-deleting its own
 Teams channel message. Chat messages, replies, batch deletion, permanent
 deletion, application permissions and service-principal deletion are out of
 scope.
+
+Current delivery evidence (2026-07-21): #43 delivered the BWS EU-only
+`cb365.msal-cache/v2` provider, PR #54 merged the credential-free T3–T6 suite,
+and PR #55 implements exact-target deletion plus integrity-protected send
+provenance. No Entra consent, BWS credential, tenant operation, production
+profile, or live deletion was used in those implementation slices. T1/T2 and
+one ordinary-member/team-owner test-tenant demonstration remain release gates.
 
 The Graph operation is `POST
 /teams/{team-id}/channels/{channel-id}/messages/{message-id}/softDelete`. It
@@ -258,12 +265,13 @@ local cache files is prohibited.
 - **Low:** overly detailed but non-secret errors, incomplete operator guidance,
   or documentation drift that does not change the enforced control.
 
-## Pre-implementation delegated-cache security gate
+## Delegated-cache and release security gate
 
-Issue 23 implementation remains **BLOCKED** until Tara links a dedicated
-delegated-auth delivery item and that item supplies all of the following
-evidence in a reviewed and merged change. Issue 20 cannot satisfy this gate
-because Mark selected HTML-only scope for that issue:
+The former implementation dependency is no longer a Blocked board state: #43
+and PR #54 supply the provider and automated evidence. The following controls
+remain the complete release gate; the owner-assisted items must still pass
+before this feature is treated as live-ready. Issue 20 cannot satisfy this
+gate because Mark selected HTML-only scope for that issue:
 
 1. A documented Azure Identity/MSAL cache architecture whose delegated
    refresh/cache material is backed only by BWS EU for delete-enabled profiles.
