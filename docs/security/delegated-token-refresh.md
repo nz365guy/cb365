@@ -85,6 +85,30 @@ Rules:
 - **R8 — App-only remains separate.** This item changes no app-only credential
   behaviour or permission.
 
+### Bound record format selected by #48
+
+The Gate 1 spike found that ADR-0057's base64 `cb365.msal-cache/v1` envelope
+left only 46.38% headroom. The selected amendment is one
+`cb365.msal-cache/v2` BWS record with the current MSAL JSON export embedded
+directly as a `json.RawMessage`-style value. This removes base64 inflation
+without splitting, truncating, compressing or interpreting the opaque cache.
+
+The v2 envelope retains the exact tenant/client/home-account/profile binding,
+monotonic generation, prior-cache digest, timestamp and writer. Serialisation
+must preserve the embedded cache bytes exactly. The post-write BWS readback
+verifies the binding, generation and SHA-256 of the embedded cache against the
+just-exported bytes before any workload request begins. Unknown schemas and a
+future MSAL export that is not valid JSON fail closed; they do not trigger a
+v1 or local-storage fallback.
+
+The evidence-safe #42 remeasurement is 10,643 bytes for the complete v2 record
+against the 26,191-byte BWS plaintext limit: 15,548 bytes / 59.36% headroom,
+passing the unchanged >=50.00% gate. The format, exact arithmetic, trade-offs
+and upgrade guard are specified in
+[`docs/plan/37-bws-delegated-cache/DESIGN-AMENDMENT.md`](../plan/37-bws-delegated-cache/DESIGN-AMENDMENT.md).
+Provider implementation remains blocked until the Department 10 ADR-0057
+amendment is accepted.
+
 ---
 
 ## 3. Credential Lifecycle (AC 2)
@@ -147,7 +171,9 @@ implementation item.
 - **Separate implementation items: yes.** This document authorises none of them:
   - **G1** — implement the BWS EU `cache.ExportReplace` adapter, migrate
     delegated profiles, remove delegated local-cache fallback and make logout
-    clear and verify BWS plus legacy cache state.
+    clear and verify BWS plus legacy cache state. Implement the accepted
+    `cb365.msal-cache/v2` single-record contract only; reject v1 and unknown
+    schemas fail closed.
   - **G2** — environment hardening: assert `AZURE_SDK_GO_LOGGING` unset in agent/VM profiles; add to ops checklist.
   - **G3** — automate T3–T6 in `test/integration/`; record T1/T2 evidence on #37.
   - **G4** — verify legacy token-store file/directory permissions during migration and fail closed on unexpected modes before reading them.

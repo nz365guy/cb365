@@ -96,6 +96,42 @@ silently split, truncated or compressed to force a fit. Notes for Design:
   documented multi-record contract — all of which are ADR-level decisions,
   not spike scope.
 
+### Gate 1 design amendment remeasurement (#48)
+
+Design selected a single `cb365.msal-cache/v2` BWS record that embeds the
+current opaque MSAL JSON export directly as a `json.RawMessage`-style value.
+The adapter validates only JSON syntax and byte preservation; it does not
+interpret or normalise MSAL fields. A future non-JSON MSAL export fails closed
+and requires a reviewed schema change. Binding, monotonic generation, prior
+cache digest, single-host locking, post-write readback and no-local-fallback
+requirements remain unchanged. See [DESIGN-AMENDMENT.md](./DESIGN-AMENDMENT.md).
+
+The original evidence-safe run retained all values required for an exact
+remeasurement. The v2 record keeps the metadata fields and lengths unchanged,
+removes the 13,592-character base64 value and its two JSON string quotes, then
+inserts the exact 10,194-byte compact JSON export:
+
+| Metric | Value |
+| --- | ---: |
+| v1 complete record | 14,043 bytes |
+| Less base64 characters and string quotes | -13,594 bytes |
+| Plus raw JSON cache | +10,194 bytes |
+| **v2 complete record** | **10,643 bytes** |
+| Verified BWS plaintext limit | 26,191 bytes |
+| Remaining bytes | 15,548 bytes |
+| **Headroom** | **59.36%** |
+| Margin below 50%-headroom ceiling | 2,452 bytes |
+
+The provenance digest remains
+`eb14f1383ccd9660ca351dd285f0133cd1f7973384f3696bad260c0ad5284288`.
+No cache or token bytes were needed or reconstructed for this calculation.
+The measurement tool now constructs the v2 record directly on any future
+authorised run and reports only sizes, the digest, headroom and verdict.
+
+**Amended Gate 1: PASS** — 59.36% is above the mandatory 50.00% headroom.
+This verdict becomes implementation-authorising only when the Department 10
+ADR-0057 amendment is accepted.
+
 ---
 
 ## Gate 2 — Bitwarden Go SDK v2 cgo build feasibility
@@ -150,11 +186,14 @@ the Go checksum database; the native artefact digest is recorded above.
 
 ## Handoff
 
-**Outcome: Gate 1 FAIL / Gate 2 PASS → back to Design per ADR-0057.**
+**Original outcome: Gate 1 FAIL / Gate 2 PASS → returned to Design per
+ADR-0057. #48 amended measurement: Gate 1 PASS, pending ADR acceptance.**
 
 - The G1 provider implementation ([cb365 #43](https://github.com/nz365guy/cb365/issues/43))
-  must not start until a superseding Design decision resolves the headroom
-  shortfall.
+  must not start until the Department 10 ADR amendment accepting the v2 record
+  is merged.
 - Gate 2's evidence (pinned SDK, both build variants, licence/provenance)
-  remains valid and carries forward to whatever Design decides.
+  remains valid and carries forward unchanged.
+- The test/evidence item [#44](https://github.com/nz365guy/cb365/issues/44)
+  remains blocked behind the accepted ADR and delivered provider.
 - Failing numbers commented on #37 and #42.
