@@ -65,15 +65,15 @@ type teamsDeleteDependencies struct {
 }
 
 type teamsDeleteAuditEvent struct {
-	Timestamp      string `json:"timestamp"`
-	Operation      string `json:"operation"`
-	TenantID       string `json:"tenantId"`
-	Profile        string `json:"profilePseudonym"`
-	TeamID         string `json:"teamId"`
-	ChannelID      string `json:"channelId"`
-	MessageID      string `json:"messageId"`
-	ResultClass    string `json:"resultClass"`
-	HTTPStatus     int    `json:"httpStatus,omitempty"`
+	Timestamp     string `json:"timestamp"`
+	Operation     string `json:"operation"`
+	TenantID      string `json:"tenantId"`
+	Profile       string `json:"profilePseudonym"`
+	TeamID        string `json:"teamId"`
+	ChannelID     string `json:"channelId"`
+	MessageID     string `json:"messageId"`
+	ResultClass   string `json:"resultClass"`
+	HTTPStatus    int    `json:"httpStatus,omitempty"`
 	CorrelationID string `json:"graphCorrelationId,omitempty"`
 }
 
@@ -130,12 +130,12 @@ var teamsChannelsDeleteMessageCmd = &cobra.Command{
 		}
 		if flagJSON {
 			return output.JSON(map[string]interface{}{
-				"result":         result.Class,
-				"team":           options.Target.TeamID,
-				"channel":        options.Target.ChannelID,
-				"message":        options.Target.MessageID,
-				"httpStatus":     result.Status,
-				"correlationId":  result.CorrelationID,
+				"result":        result.Class,
+				"team":          options.Target.TeamID,
+				"channel":       options.Target.ChannelID,
+				"message":       options.Target.MessageID,
+				"httpStatus":    result.Status,
+				"correlationId": result.CorrelationID,
 			})
 		}
 		output.Success(fmt.Sprintf("Message %s soft-deleted (HTTP %d)", options.Target.MessageID, result.Status))
@@ -205,15 +205,15 @@ func finishTeamsDelete(
 		profilePseudonym = teamsDeleteProfilePseudonym(profile)
 	}
 	event := teamsDeleteAuditEvent{
-		Timestamp:      deps.now().UTC().Format(time.RFC3339Nano),
-		Operation:      teamsDeleteOperation,
-		TenantID:       tenantID,
-		Profile:        profilePseudonym,
-		TeamID:         target.TeamID,
-		ChannelID:      target.ChannelID,
-		MessageID:      target.MessageID,
-		ResultClass:    result.Class,
-		HTTPStatus:     result.Status,
+		Timestamp:     deps.now().UTC().Format(time.RFC3339Nano),
+		Operation:     teamsDeleteOperation,
+		TenantID:      tenantID,
+		Profile:       profilePseudonym,
+		TeamID:        target.TeamID,
+		ChannelID:     target.ChannelID,
+		MessageID:     target.MessageID,
+		ResultClass:   result.Class,
+		HTTPStatus:    result.Status,
 		CorrelationID: result.CorrelationID,
 	}
 	if auditErr := deps.audit(event); auditErr != nil {

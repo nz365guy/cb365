@@ -7,9 +7,9 @@ import (
 	"time"
 
 	msgraphsdkgo "github.com/microsoftgraph/msgraph-sdk-go"
+	chatsPkg "github.com/microsoftgraph/msgraph-sdk-go/chats"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	teamsPkg "github.com/microsoftgraph/msgraph-sdk-go/teams"
-	chatsPkg "github.com/microsoftgraph/msgraph-sdk-go/chats"
 	usersPkg "github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
@@ -348,7 +348,7 @@ var teamsChatListCmd = &cobra.Command{
 		top := int32(maxFlag)
 		config := &usersPkg.ItemChatsRequestBuilderGetRequestConfiguration{
 			QueryParameters: &usersPkg.ItemChatsRequestBuilderGetQueryParameters{
-				Top: &top,
+				Top:     &top,
 				Orderby: []string{"lastMessagePreview/createdDateTime desc"},
 			},
 		}
