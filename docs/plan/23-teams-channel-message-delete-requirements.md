@@ -1,7 +1,7 @@
 # Requirements: safeguarded Teams channel-message soft-delete
 
 > **Source issue:** [#23](https://github.com/nz365guy/cb365/issues/23)  
-> **Status:** Requirements Complete — approved scope; Code is dependency-gated  
+> **Status:** Implementation in PR #55; live release remains gated by #44 T1/T2 and the approved test-tenant demonstration
 > **Author:** Scout 🔍 · **Date:** 2026-07-21 (Pacific/Auckland)  
 > **Security design:** [`ISSUE-23-DELEGATED-DELETE-THREAT-MODEL.md`](../security/ISSUE-23-DELEGATED-DELETE-THREAT-MODEL.md) (PR #38)  
 > **Shared dependencies:** #43 managed delegated-cache provider; #44 T1–T6 evidence
@@ -14,6 +14,12 @@ An authenticated work-or-school user needs to retract a Teams **root channel mes
 - **Authoritative API evidence:** Microsoft Graph's `softDelete` channel-message endpoint is `POST /teams/{team-id}/channels/{channel-id}/messages/{message-id}/softDelete`, returns `204 No Content`, requires delegated work-or-school `ChannelMessage.ReadWrite`, and provides no application permission. [Microsoft Learn](https://learn.microsoft.com/en-us/graph/api/chatmessage-softdelete?view=graph-rest-1.0)
 
 ## 2. Requirements
+
+PR #55 implements the command, BWS EU provenance record, send-path recording,
+one-shot Graph transport, provenance retirement, metadata-only audit, strict
+local guards, supported/no-cgo behaviour, and recording-transport tests. No
+tenant, consent, BWS credential, production profile, or live Graph operation
+is part of the implementation PR.
 
 | ID | Type | Pri | Requirement | Source | Rationale | Acceptance criteria | Verify | Status |
 |---|---|---|---|---|---|---|---|---|
@@ -50,12 +56,12 @@ An authenticated work-or-school user needs to retract a Teams **root channel mes
 
 ## 5. Release gates and dependencies
 
-Code may implement the command contract only after #43 exposes the accepted BWS-backed delegated provider and provenance-supporting send path. Release requires all of the following evidence:
+Code implementation may proceed because #43 now exposes the accepted BWS-backed delegated provider. Release still requires all of the following evidence:
 
-1. #43 merged with BWS-only cache binding, fail-closed migration/logout/revocation behaviour and supported build handling.
-2. #44's T3–T6 automation green in CI and secret-free T1/T2 test-tenant evidence recorded on #37.
-3. A dedicated #23 recording-transport suite proving every REQ-2301–REQ-2307 negative and authorised path, including zero-request, no-retry and redaction assertions.
-4. A test-tenant demonstration of an authenticated user's own root-message soft-delete after normal Entra consent; no production tenant operation is included in this work item.
+1. **Complete:** #43 merged with BWS-only cache binding, fail-closed migration/logout/revocation behaviour and supported build handling.
+2. **Partial:** #44's T3–T6 automation is green in merged PR #54; secret-free T1/T2 test-tenant evidence on #37 remains.
+3. **Implemented in PR #55:** the #23 recording-transport suite proves local zero-request guards, app-only/missing-scope rejection, provenance/token failure, exact one-POST behaviour, no retry after timeout or HTTP failure, provenance retirement, audit failure handling, and redaction.
+4. **Pending owner-assisted Test:** a test-tenant demonstration of an authenticated user's own root-message soft-delete after normal Entra consent; no production tenant operation is included in this work item.
 
 ## 6. Out of scope
 

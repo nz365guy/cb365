@@ -289,8 +289,11 @@ Human-readable output goes to stderr. Machine-readable output (`--json`, `--plai
 |---------|-------------|
 | `cb365 teams channels list --team "Name"` | List channels in a team |
 | `cb365 teams channels send --team "Name" --channel "General" --body "..." [--html] --confirm` | Post to a channel (optionally as HTML) |
+| `cb365 teams channels delete-message --team ID --channel ID --message ID --confirm` | Soft-delete one root channel message previously sent and recorded by the same managed delegated profile |
 | `cb365 teams chat list` | List 1:1 and group chats |
 | `cb365 teams chat send --chat ID --body "..."` | Send a chat message |
+
+`delete-message` accepts exact IDs only. It requires the BWS EU managed delegated provider, delegated `ChannelMessage.ReadWrite`, and a matching integrity-protected provenance record created by a successful cb365 channel send. App-only profiles, broader ownership-read permissions, unrecorded or mismatched messages, replies, batches, and automatic retries are refused. A transport timeout is reported as ambiguous and must not be retried.
 
 ### SharePoint
 
@@ -351,7 +354,7 @@ Add only the scopes you need when registering your Entra app.
 | Calendar | `Calendars.ReadWrite` | `Calendars.ReadWrite` |
 | Contacts | `Contacts.ReadWrite` | `Contacts.ReadWrite` |
 | Planner | `Group.ReadWrite.All` | `Group.ReadWrite.All` |
-| Teams | `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Send`, `Chat.ReadWrite` | — |
+| Teams | `Team.ReadBasic.All`, `Channel.ReadBasic.All`, `ChannelMessage.Send`, `Chat.ReadWrite`; `ChannelMessage.ReadWrite` only for the safeguarded soft-delete profile | — |
 | SharePoint | `Sites.ReadWrite.All`, `Files.ReadWrite.All` | `Sites.ReadWrite.All`, `Files.ReadWrite.All` |
 | OneDrive | `Files.ReadWrite.All` | `Files.ReadWrite.All` |
 | Loop | — | `FileStorageContainer.Selected` |
@@ -376,11 +379,11 @@ cb365 auth login \
 
 ## Safety Rules
 
-cb365 has 44 safety rules hardcoded in Go. They cannot be bypassed by configuration, environment variables, or prompt injection. Here are the key patterns:
+cb365 has hardcoded safety rules in Go. They cannot be bypassed by configuration, environment variables, or prompt injection. Here are the key patterns:
 
 ### Write Protection
 
-All write operations support `--dry-run` to preview without executing. Destructive operations (delete, overwrite) require `--force`. Broadcast operations (Teams channel posts, mail send) require `--confirm`.
+All write operations support `--dry-run` to preview without executing. Destructive operations require an explicit safety flag: most use `--force`, while the exact-target Teams soft-delete uses `--confirm`. Broadcast operations (Teams channel posts, mail send) also require `--confirm`.
 
 ### Calendar Safety (14 rules)
 
