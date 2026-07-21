@@ -37,12 +37,13 @@ type Profile struct {
 // Manager EU. None of these fields is sufficient to authenticate to either
 // Bitwarden or Entra.
 type ManagedDelegatedMetadata struct {
-	HomeAccountID  string `json:"home_account_id"`
-	SecretID       string `json:"secret_id"`
-	OrganisationID string `json:"organisation_id"`
-	ProjectID      string `json:"project_id"`
-	AssignedHost   string `json:"assigned_host"`
-	MigrationState string `json:"migration_state"`
+	HomeAccountID            string            `json:"home_account_id"`
+	SecretID                 string            `json:"secret_id"`
+	OrganisationID           string            `json:"organisation_id"`
+	ProjectID                string            `json:"project_id"`
+	AssignedHost             string            `json:"assigned_host"`
+	MigrationState           string            `json:"migration_state"`
+	ChannelMessageProvenance map[string]string `json:"channel_message_provenance,omitempty"`
 }
 
 // Config represents the cb365 configuration file

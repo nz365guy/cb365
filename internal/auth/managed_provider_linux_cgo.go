@@ -370,6 +370,12 @@ func cloneProfile(profile *config.Profile) *config.Profile {
 	cloned.Scopes = append([]string(nil), profile.Scopes...)
 	if profile.ManagedDelegated != nil {
 		metadata := *profile.ManagedDelegated
+		if profile.ManagedDelegated.ChannelMessageProvenance != nil {
+			metadata.ChannelMessageProvenance = make(map[string]string, len(profile.ManagedDelegated.ChannelMessageProvenance))
+			for key, value := range profile.ManagedDelegated.ChannelMessageProvenance {
+				metadata.ChannelMessageProvenance[key] = value
+			}
+		}
 		cloned.ManagedDelegated = &metadata
 	}
 	return &cloned

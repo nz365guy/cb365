@@ -32,10 +32,10 @@ func deref(s *string) string {
 
 func ptr(s string) *string { return &s }
 
-func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
+func loadSelectedProfile() (*config.Config, string, *config.Profile, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return nil, err
+		return nil, "", nil, err
 	}
 
 	profileName := flagProfile
@@ -43,14 +43,25 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		profileName = cfg.ActiveProfile
 	}
 	if profileName == "" {
-		return nil, fmt.Errorf("no active profile — run 'cb365 auth login' first")
+		return nil, "", nil, fmt.Errorf("no active profile — run 'cb365 auth login' first")
 	}
 
 	profile, ok := cfg.Profiles[profileName]
 	if !ok {
-		return nil, fmt.Errorf("profile %q not found", profileName)
+		return nil, "", nil, fmt.Errorf("profile %q not found", profileName)
 	}
+	return cfg, profileName, profile, nil
+}
 
+func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
+	cfg, profileName, profile, err := loadSelectedProfile()
+	if err != nil {
+		return nil, err
+	}
+	return newGraphClientForProfile(cfg, profileName, profile)
+}
+
+func newGraphClientForProfile(cfg *config.Config, profileName string, profile *config.Profile) (*msgraphsdkgo.GraphServiceClient, error) {
 	ipv4Only := auth.ShouldUseIPv4(cfg)
 
 	// ── Delegated profiles: use MSAL persistent cache for silent refresh ──

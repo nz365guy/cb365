@@ -11,6 +11,8 @@ import (
 	teamsPkg "github.com/microsoftgraph/msgraph-sdk-go/teams"
 	chatsPkg "github.com/microsoftgraph/msgraph-sdk-go/chats"
 	usersPkg "github.com/microsoftgraph/msgraph-sdk-go/users"
+	"github.com/nz365guy/cb365/internal/auth"
+	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -229,7 +231,11 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 			return fmt.Errorf("channel messages are visible to all members — pass --confirm to send")
 		}
 
-		client, err := newGraphClient()
+		cfg, profileName, profile, err := loadSelectedProfile()
+		if err != nil {
+			return err
+		}
+		client, err := newGraphClientForProfile(cfg, profileName, profile)
 		if err != nil {
 			return err
 		}
@@ -272,11 +278,34 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 		msg.SetBody(body)
 
 		// Build request config with empty options to avoid nil pointer
-		config := &teamsPkg.ItemChannelsItemMessagesRequestBuilderPostRequestConfiguration{}
+		requestConfig := &teamsPkg.ItemChannelsItemMessagesRequestBuilderPostRequestConfiguration{}
 
-		sent, err := client.Teams().ByTeamId(teamID).Channels().ByChannelId(channelID).Messages().Post(ctx, msg, config)
+		sent, err := client.Teams().ByTeamId(teamID).Channels().ByChannelId(channelID).Messages().Post(ctx, msg, requestConfig)
 		if err != nil {
 			return fmt.Errorf("sending channel message: %w", err)
+		}
+		if profile.AuthMode == config.AuthModeDelegated && profile.ManagedDelegated != nil {
+			target := auth.ManagedChannelMessageTarget{
+				TeamID:    teamID,
+				ChannelID: channelID,
+				MessageID: deref(sent.GetId()),
+			}
+			reference, provenanceErr := auth.RecordManagedChannelMessageProvenance(ctx, profile, target)
+			if provenanceErr != nil {
+				return fmt.Errorf("message was sent but managed deletion provenance was not recorded; do not use delete-message: %w", provenanceErr)
+			}
+			if profile.ManagedDelegated.ChannelMessageProvenance == nil {
+				profile.ManagedDelegated.ChannelMessageProvenance = make(map[string]string)
+			}
+			key := auth.ManagedChannelMessageProvenanceKey(target)
+			profile.ManagedDelegated.ChannelMessageProvenance[key] = reference
+			if saveErr := cfg.Save(); saveErr != nil {
+				deleteErr := auth.DeleteManagedChannelMessageProvenance(context.Background(), profile, reference, target)
+				if deleteErr != nil {
+					return fmt.Errorf("message was sent but deletion provenance metadata could not be saved or rolled back; do not use delete-message")
+				}
+				return fmt.Errorf("message was sent but deletion provenance metadata could not be saved; do not use delete-message: %w", saveErr)
+			}
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -460,6 +489,13 @@ func init() {
 	teamsChannelsSendCmd.Flags().Bool("confirm", false, "Confirm sending to channel (required safety flag)")
 	teamsChannelsCmd.AddCommand(teamsChannelsSendCmd)
 
+	// teams channels delete-message
+	teamsChannelsDeleteMessageCmd.Flags().String("team", "", "Exact team ID (required)")
+	teamsChannelsDeleteMessageCmd.Flags().String("channel", "", "Exact channel ID (required)")
+	teamsChannelsDeleteMessageCmd.Flags().String("message", "", "Exact root message ID (required)")
+	teamsChannelsDeleteMessageCmd.Flags().Bool("confirm", false, "Confirm soft-deleting this exact message (required)")
+	teamsChannelsCmd.AddCommand(teamsChannelsDeleteMessageCmd)
+
 	// teams chat list
 	teamsChatListCmd.Flags().Int("max", 25, "Maximum chats to return")
 	teamsChatCmd.AddCommand(teamsChatListCmd)
@@ -473,4 +509,3 @@ func init() {
 	teamsCmd.AddCommand(teamsChannelsCmd)
 	teamsCmd.AddCommand(teamsChatCmd)
 }
-
