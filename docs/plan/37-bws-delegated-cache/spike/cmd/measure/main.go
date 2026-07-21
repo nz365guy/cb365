@@ -5,8 +5,9 @@
 // cache.ExportReplace capture — the same extension point the production
 // provider will use — then prints ONLY evidence-safe numbers:
 //
-//	raw exported cache size, its SHA-256 digest, the base64 length, and the
-//	size of the full ADR-0057 envelope built from real binding values.
+//	raw exported cache size, its SHA-256 digest, the legacy base64 length,
+//	and the size/headroom of the complete amended ADR-0057 record built from
+//	real binding values.
 //
 // The cache bytes never touch disk, argv, or the output. No BWS record is
 // read or written. A silent acquisition is performed after login so the
@@ -55,8 +56,12 @@ func (c *captureCache) Export(_ context.Context, m cache.Marshaler, _ cache.Expo
 	return nil
 }
 
-// envelope mirrors the ADR-0057 record contract exactly, so the measured
-// size is the size that must fit the BWS secret-value limit.
+const bwsPlaintextLimit = 26191
+
+// envelope mirrors the amended ADR-0057 record contract exactly, so the
+// measured size is the size that must fit the BWS secret-value limit. Cache is
+// embedded byte-for-byte as a JSON value. The adapter treats its contents as
+// opaque and does not parse or normalise them.
 type envelope struct {
 	SchemaVersion string `json:"schemaVersion"`
 	Binding       struct {
@@ -65,11 +70,11 @@ type envelope struct {
 		HomeAccountID string `json:"homeAccountId"`
 		Profile       string `json:"profile"`
 	} `json:"binding"`
-	Generation     int     `json:"generation"`
-	PreviousDigest *string `json:"previousDigest"`
-	Cache          string  `json:"cache"`
-	UpdatedAt      string  `json:"updatedAt"`
-	Writer         string  `json:"writer"`
+	Generation     int             `json:"generation"`
+	PreviousDigest *string         `json:"previousDigest"`
+	Cache          json.RawMessage `json:"cache"`
+	UpdatedAt      string          `json:"updatedAt"`
+	Writer         string          `json:"writer"`
 }
 
 func main() {
@@ -137,10 +142,14 @@ func main() {
 	}
 
 	sum := sha256.Sum256(cap.data)
-	b64 := base64.StdEncoding.EncodeToString(cap.data)
+	if !json.Valid(cap.data) {
+		fmt.Fprintln(os.Stderr, "exported cache is not valid JSON; amended managed-cache schema cannot store it")
+		os.Exit(1)
+	}
+	legacyB64Len := base64.StdEncoding.EncodedLen(len(cap.data))
 
 	prev := "sha256:" + hex.EncodeToString(sum[:]) // realistic worst-case field size
-	env := envelope{SchemaVersion: "cb365.msal-cache/v1", Generation: 1000, PreviousDigest: &prev, Cache: b64,
+	env := envelope{SchemaVersion: "cb365.msal-cache/v2", Generation: 1000, PreviousDigest: &prev, Cache: json.RawMessage(cap.data),
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339), Writer: hostnameOr("openclaw-vm")}
 	env.Binding.TenantID = *tenantID
 	env.Binding.ClientID = *clientID
@@ -158,8 +167,15 @@ func main() {
 	fmt.Printf("  exports_observed: %d\n", cap.exports)
 	fmt.Printf("  raw_cache_bytes: %d\n", len(cap.data))
 	fmt.Printf("  raw_cache_sha256: %s\n", hex.EncodeToString(sum[:]))
-	fmt.Printf("  base64_cache_chars: %d\n", len(b64))
-	fmt.Printf("  envelope_bytes: %d\n", len(envBytes))
+	fmt.Printf("  legacy_base64_cache_chars: %d\n", legacyB64Len)
+	fmt.Printf("  complete_record_bytes: %d\n", len(envBytes))
+	fmt.Printf("  bws_plaintext_limit_bytes: %d\n", bwsPlaintextLimit)
+	fmt.Printf("  headroom_percent: %.2f\n", float64(bwsPlaintextLimit-len(envBytes))/float64(bwsPlaintextLimit)*100)
+	if len(envBytes)*2 <= bwsPlaintextLimit {
+		fmt.Println("  gate1_verdict: PASS")
+	} else {
+		fmt.Println("  gate1_verdict: FAIL")
+	}
 	fmt.Printf("  home_account_id_chars: %d\n", len(result.Account.HomeAccountID))
 }
 
