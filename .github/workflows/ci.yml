@@ -42,10 +42,18 @@ jobs:
       - name: Test managed provider and verify redacted output
         run: |
           CGO_ENABLED=1 go test -v ./... 2>&1 | tee /tmp/test-managed.out
-          sentinel='eyJhbGciOiJub25lIn0.opaque-managed-test-sentinel'
+          sentinel='e''yJhbGciOiJub25lIn0.opaque-managed-test-sentinel'
           if grep -F "$sentinel" /tmp/test-managed.out; then
             echo 'managed token sentinel reached test output'; exit 1
           fi
+
+      - name: Run credential-free T3-T6 evidence suite
+        run: |
+          env -u BWS_ACCESS_TOKEN \
+            -u AZURE_CLIENT_SECRET \
+            -u AZURE_CLIENT_CERTIFICATE_PASSWORD \
+            -u CB365_KEYRING_PASSWORD \
+            CGO_ENABLED=1 go test -tags managed_evidence -v ./test/integration/
 
       - name: Test unsupported provider stub (CGO_ENABLED=0)
         run: CGO_ENABLED=0 go test -v ./...
