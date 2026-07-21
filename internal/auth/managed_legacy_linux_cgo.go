@@ -275,26 +275,26 @@ func deleteLegacyAzureIdentityKey() error {
 		rings = []int{persistentRing, userRing}
 	}
 	for _, name := range legacyAzureIdentityCacheNames {
-	for _, ring := range rings {
-		for {
-			keyID, searchErr := unix.KeyctlSearch(ring, "user", name, 0)
-			if searchErr != nil {
-				if isLegacyKeyAbsent(searchErr) {
-					break
+		for _, ring := range rings {
+			for {
+				keyID, searchErr := unix.KeyctlSearch(ring, "user", name, 0)
+				if searchErr != nil {
+					if isLegacyKeyAbsent(searchErr) {
+						break
+					}
+					return managedError(ManagedCacheUnavailable, "locate legacy Azure Identity cache key", searchErr)
 				}
-				return managedError(ManagedCacheUnavailable, "locate legacy Azure Identity cache key", searchErr)
+				if _, unlinkErr := unix.KeyctlInt(unix.KEYCTL_UNLINK, keyID, ring, 0, 0); unlinkErr != nil {
+					if isLegacyKeyAbsent(unlinkErr) {
+						break
+					}
+					return managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache key", unlinkErr)
+				}
 			}
-			if _, unlinkErr := unix.KeyctlInt(unix.KEYCTL_UNLINK, keyID, ring, 0, 0); unlinkErr != nil {
-				if isLegacyKeyAbsent(unlinkErr) {
-					break
-				}
-				return managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache key", unlinkErr)
+			if _, searchErr := unix.KeyctlSearch(ring, "user", name, 0); !isLegacyKeyAbsent(searchErr) {
+				return managedError(ManagedCacheConflict, "verify legacy Azure Identity cache key deletion", nil)
 			}
 		}
-		if _, searchErr := unix.KeyctlSearch(ring, "user", name, 0); !isLegacyKeyAbsent(searchErr) {
-			return managedError(ManagedCacheConflict, "verify legacy Azure Identity cache key deletion", nil)
-		}
-	}
 	}
 	return nil
 }
