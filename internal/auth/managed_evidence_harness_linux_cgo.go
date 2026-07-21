@@ -306,7 +306,7 @@ func runEvidenceT6(results map[string]ManagedEvidenceResult, root, sentinel stri
 		return err
 	}
 	history = append(history, "legacy-read")
-	if _, err := os.ReadFile(legacyFile); err != nil {
+	if _, err := os.ReadFile(legacyFile); err != nil { // #nosec G304 -- test-only path is derived from the caller-owned absolute temporary root
 		return err
 	}
 	store := newEvidenceStore()
@@ -324,7 +324,7 @@ func runEvidenceT6(results map[string]ManagedEvidenceResult, root, sentinel stri
 	history = append(history, "legacy-delete")
 	results["t6a"] = ManagedEvidenceResult{LegacyReads: 1, SourceRetained: fileExists(legacyFile), History: append([]string(nil), history...)}
 
-	if err := os.WriteFile(legacyFile, []byte("encrypted legacy fixture"), 0644); err != nil {
+	if err := os.WriteFile(legacyFile, []byte("encrypted legacy fixture"), 0644); err != nil { // #nosec G306 -- deliberately unsafe mode fixture must be rejected before read
 		return err
 	}
 	permissionErr := verifyOptionalOwnedPath(legacyFile, false, 0600, true)
@@ -372,7 +372,7 @@ func scanEvidenceRoot(root, sentinel string) (bool, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G122 G304 -- test-only scanner walks a non-concurrent t.TempDir-owned root
 		if err != nil {
 			return err
 		}
