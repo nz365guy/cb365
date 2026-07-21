@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Non-secret environment-variable name in auth expiry test"
+regexTarget = "match"
+regexes = ['''CB365_TEST_ENVINT_XYZ''']
