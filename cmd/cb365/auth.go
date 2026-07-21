@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/nz365guy/cb365/internal/auth"
 	"github.com/nz365guy/cb365/internal/config"
@@ -34,6 +34,8 @@ var (
 	loginMode         string
 	loginClientSecret string
 	loginCertificate  string
+	loginBWSOrg       string
+	loginBWSProject   string
 )
 
 var authLoginCmd = &cobra.Command{
@@ -45,8 +47,15 @@ var authLoginCmd = &cobra.Command{
 		}
 
 		mode := config.AuthModeDelegated
-		if loginMode == "app-only" {
+		switch loginMode {
+		case "delegated":
+			if loginBWSOrg == "" || loginBWSProject == "" {
+				return fmt.Errorf("--bws-organization and --bws-project are required for delegated mode")
+			}
+		case "app-only":
 			mode = config.AuthModeAppOnly
+		default:
+			return fmt.Errorf("invalid --mode %q: use delegated or app-only", loginMode)
 		}
 
 		cfg, err := config.Load()
@@ -69,21 +78,31 @@ var authLoginCmd = &cobra.Command{
 			AuthMode: mode,
 			Scopes:   loginScopes,
 		}
+		if existing, ok := cfg.Profiles[profileName]; ok && mode == config.AuthModeDelegated {
+			if existing.ManagedDelegated == nil {
+				return fmt.Errorf("legacy delegated profile %q already exists; run 'cb365 auth migrate --profile %s'", profileName, profileName)
+			}
+			return fmt.Errorf("managed delegated profile %q already exists; log it out before replacing it", profileName)
+		}
 
 		ipv4Only := auth.ShouldUseIPv4(cfg)
 		if ipv4Only && flagVerbose {
 			output.Info("Using IPv4-only transport (CB365_IPV4_ONLY=1)")
 		}
 
-		// Pre-flight: verify token store is accessible BEFORE starting auth flow.
-		// This prevents the user from completing browser auth only to have the
-		// token discarded because the store can't be initialized.
-		if _, err := auth.LoadToken("__preflight_check__"); err != nil {
-			// LoadToken failing on a non-existent profile is expected (key not found).
-			// But if the error is about store initialization, that's a real problem.
-			errMsg := err.Error()
-			if strings.Contains(errMsg, "CB365_KEYRING_PASSWORD") || strings.Contains(errMsg, "token store") || strings.Contains(errMsg, "keychain") {
-				return fmt.Errorf("token store not available — fix this BEFORE authenticating:\n  %s", errMsg)
+		// App-only credentials retain their existing local token-store boundary.
+		// Delegated authentication must never initialise or fall back to it.
+		if mode == config.AuthModeAppOnly {
+			// Pre-flight: verify token store is accessible BEFORE starting auth flow.
+			// This prevents the user from completing browser auth only to have the
+			// token discarded because the store can't be initialized.
+			if _, err := auth.LoadToken("__preflight_check__"); err != nil {
+				// LoadToken failing on a non-existent profile is expected (key not found).
+				// But if the error is about store initialization, that's a real problem.
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "CB365_KEYRING_PASSWORD") || strings.Contains(errMsg, "token store") || strings.Contains(errMsg, "keychain") {
+					return fmt.Errorf("token store not available — fix this BEFORE authenticating:\n  %s", errMsg)
+				}
 			}
 		}
 
@@ -94,7 +113,6 @@ var authLoginCmd = &cobra.Command{
 		var expiresOn time.Time
 		var clientSecretToStore string
 		var certPathToStore string
-		var authRecordStr string
 
 		if mode == config.AuthModeAppOnly {
 			// App-only: certificate auth OR client credentials
@@ -137,12 +155,12 @@ var authLoginCmd = &cobra.Command{
 				profile.Username = "(app-only)"
 			}
 		} else {
-			// Delegated: device-code flow with MSAL persistent cache.
-			// MSAL stores both access and refresh tokens, enabling
-			// silent renewal for ~90 days without user interaction.
-			output.Info(fmt.Sprintf("Authenticating profile %q via device code flow (with persistent cache)...", profileName))
+			output.Info(fmt.Sprintf("Authenticating profile %q via the BWS EU-backed device-code flow...", profileName))
 
-			result, loginErr := auth.LoginDelegatedWithCache(ctx, profile, ipv4Only, func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+			result, loginErr := auth.LoginManagedDelegated(ctx, profile, auth.ManagedLoginOptions{
+				OrganisationID: loginBWSOrg,
+				ProjectID:      loginBWSProject,
+			}, ipv4Only, func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
 				fmt.Println()
 				fmt.Println(msg.Message)
 				fmt.Println()
@@ -153,36 +171,31 @@ var authLoginCmd = &cobra.Command{
 			}
 			tokenStr = result.Token.Token
 			expiresOn = result.Token.ExpiresOn
-
-			// Serialize the AuthenticationRecord for future silent refresh
-			recordJSON, marshalErr := json.Marshal(result.AuthRecord)
-			if marshalErr == nil {
-				authRecordStr = string(recordJSON)
-			}
-
-			info, decodeErr := auth.DecodeTokenInfo(tokenStr)
-			if decodeErr == nil && info.UPN != "" {
-				profile.Username = info.UPN
-			}
+			profile.Username = result.Username
+			profile.ManagedDelegated = &result.Metadata
 		}
 
-		cache := &auth.TokenCache{
-			AccessToken:  tokenStr,
-			ClientSecret: clientSecretToStore,
-			CertPath:     certPathToStore,
-			AuthRecord:   authRecordStr,
-			ExpiresAt:    expiresOn.Format(time.RFC3339),
-			TokenType:    "Bearer",
-			Scope:        fmt.Sprintf("%v", profile.Scopes),
-		}
-		if err := auth.StoreToken(profileName, cache); err != nil {
-			return fmt.Errorf("storing token: %w", err)
+		if mode == config.AuthModeAppOnly {
+			cache := &auth.TokenCache{
+				AccessToken:  tokenStr,
+				ClientSecret: clientSecretToStore,
+				CertPath:     certPathToStore,
+				ExpiresAt:    expiresOn.Format(time.RFC3339),
+				TokenType:    "Bearer",
+				Scope:        fmt.Sprintf("%v", profile.Scopes),
+			}
+			if err := auth.StoreToken(profileName, cache); err != nil {
+				return fmt.Errorf("storing token: %w", err)
+			}
 		}
 
 		cfg.Profiles[profileName] = profile
 		cfg.ActiveProfile = profileName
 		profile.Active = true
 		if err := cfg.Save(); err != nil {
+			if mode == config.AuthModeDelegated {
+				_ = auth.DiscardManagedDelegatedRecord(context.Background(), profile)
+			}
 			return fmt.Errorf("saving config: %w", err)
 		}
 
@@ -226,39 +239,34 @@ var authStatusCmd = &cobra.Command{
 			return fmt.Errorf("profile %q not found", profileName)
 		}
 
-		cache, err := auth.LoadToken(profileName)
-		if err != nil {
-			return err
-		}
-
-		// Auto-refresh expired delegated tokens via MSAL persistent cache
+		var cache *auth.TokenCache
+		var accessToken string
 		if profile.AuthMode == config.AuthModeDelegated {
-			info, decodeErr := auth.DecodeTokenInfo(cache.AccessToken)
-			if decodeErr != nil || info.IsExpired {
-				cfg2, _ := config.Load()
-				ipv4Only := auth.ShouldUseIPv4(cfg2)
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				if flagVerbose {
-					output.Info("Token expired \u2014 refreshing via MSAL cache...")
-				}
-
-				token, refreshErr := auth.GetTokenSilent(ctx, profile, cache.AuthRecord, profile.Scopes, ipv4Only)
-				if refreshErr != nil {
-					return fmt.Errorf("silent refresh failed: %w", refreshErr)
-				}
-
-				cache.AccessToken = token.Token
-				cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
-				if err := auth.StoreToken(profileName, cache); err != nil {
-					return fmt.Errorf("storing refreshed token: %w", err)
-				}
-
-				if flagVerbose {
-					output.Success("Token refreshed successfully")
-				}
+			if profile.ManagedDelegated == nil {
+				return fmt.Errorf("legacy delegated profile %q is disabled; run 'cb365 auth migrate --profile %s'", profileName, profileName)
 			}
+			ipv4Only := auth.ShouldUseIPv4(cfg)
+			credential, credentialErr := auth.NewManagedDelegatedCredential(profile, ipv4Only)
+			if credentialErr != nil {
+				return credentialErr
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			scopes := auth.GraphScopes(profile.Scopes)
+			if len(scopes) == 0 {
+				scopes = []string{"https://graph.microsoft.com/.default"}
+			}
+			token, tokenErr := credential.GetToken(ctx, policy.TokenRequestOptions{Scopes: scopes, EnableCAE: true})
+			if tokenErr != nil {
+				return tokenErr
+			}
+			accessToken = token.Token
+		} else {
+			cache, err = auth.LoadToken(profileName)
+			if err != nil {
+				return err
+			}
+			accessToken = cache.AccessToken
 		}
 
 		// Auto-refresh expired app-only tokens.
@@ -290,6 +298,7 @@ var authStatusCmd = &cobra.Command{
 				}
 
 				cache.AccessToken = token.Token
+				accessToken = token.Token
 				cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
 				if err := auth.StoreToken(profileName, cache); err != nil {
 					return fmt.Errorf("storing refreshed token: %w", err)
@@ -301,7 +310,7 @@ var authStatusCmd = &cobra.Command{
 			}
 		}
 
-		info, err := auth.DecodeTokenInfo(cache.AccessToken)
+		info, err := auth.DecodeTokenInfo(accessToken)
 		if err != nil {
 			return fmt.Errorf("decoding token: %w", err)
 		}
@@ -317,7 +326,7 @@ var authStatusCmd = &cobra.Command{
 			haveCertExpiry      bool
 			certWithinThreshold bool
 		)
-		if cache.CertPath != "" {
+		if cache != nil && cache.CertPath != "" {
 			if notAfter, certErr := parseCertNotAfter(cache.CertPath); certErr == nil {
 				haveCertExpiry = true
 				certExpiresAt = notAfter.Format(time.RFC3339)
@@ -478,7 +487,17 @@ var authLogoutCmd = &cobra.Command{
 			return fmt.Errorf("no profile specified and no active profile set")
 		}
 
-		if err := auth.DeleteToken(profileName); err != nil {
+		profile, ok := cfg.Profiles[profileName]
+		if !ok {
+			return fmt.Errorf("profile %q not found", profileName)
+		}
+		if profile.AuthMode == config.AuthModeDelegated && profile.ManagedDelegated != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := auth.DeleteManagedDelegated(ctx, profile); err != nil {
+				return err
+			}
+		} else if err := auth.DeleteToken(profileName); err != nil {
 			return err
 		}
 
@@ -499,6 +518,103 @@ var authLogoutCmd = &cobra.Command{
 		}
 
 		output.Success(fmt.Sprintf("Logged out of profile %q", profileName))
+		if profile.AuthMode == config.AuthModeDelegated {
+			output.Info("Local and BWS delegated credentials were removed. Entra session revocation is a separate operator action.")
+		}
+		return nil
+	},
+}
+
+// --- auth migrate ---
+
+var (
+	migrateBWSOrg     string
+	migrateBWSProject string
+)
+
+var authMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Migrate one legacy delegated profile to BWS EU",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		profileName := flagProfile
+		if profileName == "" {
+			profileName = cfg.ActiveProfile
+		}
+		if profileName == "" {
+			return fmt.Errorf("no profile specified and no active profile set")
+		}
+		profile, ok := cfg.Profiles[profileName]
+		if !ok {
+			return fmt.Errorf("profile %q not found", profileName)
+		}
+		if profile.AuthMode != config.AuthModeDelegated {
+			return fmt.Errorf("profile %q is app-only; delegated migration does not apply", profileName)
+		}
+
+		if profile.ManagedDelegated != nil {
+			switch profile.ManagedDelegated.MigrationState {
+			case "complete":
+				return fmt.Errorf("profile %q is already managed", profileName)
+			case "cleanup_required":
+				if err := auth.ResumeManagedDelegatedMigration(context.Background(), profile); err != nil {
+					return err
+				}
+				profile.ManagedDelegated.MigrationState = "complete"
+				if err := cfg.Save(); err != nil {
+					return fmt.Errorf("saving completed migration state: %w", err)
+				}
+				output.Success(fmt.Sprintf("Completed delegated credential migration for profile %q", profileName))
+				return nil
+			default:
+				return fmt.Errorf("profile %q has invalid managed migration state", profileName)
+			}
+		}
+
+		if migrateBWSOrg == "" || migrateBWSProject == "" {
+			return fmt.Errorf("--bws-organization and --bws-project are required to start migration")
+		}
+		legacyProfiles := 0
+		for _, candidate := range cfg.Profiles {
+			if candidate.AuthMode == config.AuthModeDelegated && candidate.ManagedDelegated == nil {
+				legacyProfiles++
+			}
+		}
+		if legacyProfiles != 1 {
+			return fmt.Errorf("migration requires exactly one legacy delegated profile because the Azure Identity cache is shared; found %d", legacyProfiles)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		result, migrateErr := auth.MigrateManagedDelegated(ctx, profile, auth.ManagedLoginOptions{
+			OrganisationID: migrateBWSOrg,
+			ProjectID:      migrateBWSProject,
+		}, auth.ShouldUseIPv4(cfg), func(ctx context.Context, msg azidentity.DeviceCodeMessage) error {
+			fmt.Println()
+			fmt.Println(msg.Message)
+			fmt.Println()
+			return nil
+		})
+		if migrateErr != nil {
+			return migrateErr
+		}
+		profile.Username = result.Username
+		profile.ManagedDelegated = &result.Metadata
+		if err := cfg.Save(); err != nil {
+			_ = auth.DiscardManagedDelegatedMigration(context.Background(), profile)
+			return fmt.Errorf("saving resumable migration state: %w", err)
+		}
+		if err := auth.ResumeManagedDelegatedMigration(context.Background(), profile); err != nil {
+			return fmt.Errorf("managed cache verified but legacy cleanup is incomplete; rerun 'cb365 auth migrate --profile %s': %w", profileName, err)
+		}
+		profile.ManagedDelegated.MigrationState = "complete"
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("legacy cleanup succeeded but saving completed migration state failed; rerun 'cb365 auth migrate --profile %s': %w", profileName, err)
+		}
+		output.Success(fmt.Sprintf("Migrated delegated profile %q to BWS EU", profileName))
 		return nil
 	},
 }
@@ -588,10 +704,15 @@ func init() {
 	authLoginCmd.Flags().StringVar(&loginMode, "mode", "delegated", "Auth mode: delegated (device-code) or app-only (client credentials)")
 	authLoginCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "Client secret for app-only mode (omit to read from stdin)")
 	authLoginCmd.Flags().StringVar(&loginCertificate, "certificate", "", "Path to PEM file with certificate and private key (app-only mode)")
+	authLoginCmd.Flags().StringVar(&loginBWSOrg, "bws-organization", "", "Bitwarden Secrets Manager organization ID (delegated mode)")
+	authLoginCmd.Flags().StringVar(&loginBWSProject, "bws-project", "", "Dedicated Bitwarden Secrets Manager project ID (delegated mode)")
+	authMigrateCmd.Flags().StringVar(&migrateBWSOrg, "bws-organization", "", "Bitwarden Secrets Manager organization ID")
+	authMigrateCmd.Flags().StringVar(&migrateBWSProject, "bws-project", "", "Dedicated Bitwarden Secrets Manager project ID")
 
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authStatusCmd)
 	authCmd.AddCommand(authLogoutCmd)
+	authCmd.AddCommand(authMigrateCmd)
 	authCmd.AddCommand(authProfilesCmd)
 	authCmd.AddCommand(authUseCmd)
 }
