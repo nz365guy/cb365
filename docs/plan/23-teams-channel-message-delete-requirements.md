@@ -1,7 +1,7 @@
 # Requirements: safeguarded Teams channel-message soft-delete
 
 > **Source issue:** [#23](https://github.com/nz365guy/cb365/issues/23)  
-> **Status:** Implementation in PR #55; live release remains gated by #44 T1/T2 and the approved test-tenant demonstration  
+> **Status:** Implementation in PR #55; live release remains gated by #44 T1/T2 and the approved test-tenant demonstration
 > **Author:** Scout 🔍 · **Date:** 2026-07-21 (Pacific/Auckland)  
 > **Security design:** [`ISSUE-23-DELEGATED-DELETE-THREAT-MODEL.md`](../security/ISSUE-23-DELEGATED-DELETE-THREAT-MODEL.md) (PR #38)  
 > **Shared dependencies:** #43 managed delegated-cache provider; #44 T1–T6 evidence
