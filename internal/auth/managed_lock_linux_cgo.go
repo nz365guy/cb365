@@ -172,7 +172,7 @@ func linuxProcessStart(pid int) (string, error) {
 }
 
 func verifyOwnedPath(path string, directory bool, requiredMode os.FileMode) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller supplies a path derived from the fixed managed-cache root; this function rejects symlinks, wrong ownership, type, and mode
 	if err != nil {
 		return managedError(ManagedCacheUnavailable, "inspect managed cache path", err)
 	}

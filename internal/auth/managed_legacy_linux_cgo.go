@@ -162,7 +162,7 @@ func verifyLegacyAzureIdentityCache(required bool) ([]string, error) {
 	found := 0
 	for _, name := range legacyAzureIdentityCacheNames {
 		file := filepath.Join(dir, name)
-		if _, err := os.Lstat(file); err == nil {
+		if _, err := os.Lstat(file); err == nil { // #nosec G703 -- dir is absolute and ownership-checked; name comes from a fixed internal allowlist
 			found++
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, managedError(ManagedCacheUnavailable, "inspect legacy delegated cache path", err)
@@ -193,25 +193,35 @@ func acquireLegacyAzureIdentityLocks(cacheFiles []string) ([]*os.File, error) {
 		lockPath := cacheFile + ".lockfile"
 		lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|syscall.O_CLOEXEC, 0600) // #nosec G304 -- derived from verified cache directory
 		if err != nil {
-			releaseLegacyAzureIdentityLocks(locks, false)
-			return nil, managedError(ManagedCacheUnavailable, "open legacy Azure Identity cache lock", err)
+			primary := managedError(ManagedCacheUnavailable, "open legacy Azure Identity cache lock", err)
+			return nil, cleanupLegacyAzureIdentityLocks(locks, nil, primary)
 		}
 		if err := verifyOwnedFile(lock, 0600); err != nil {
-			_ = lock.Close()
-			releaseLegacyAzureIdentityLocks(locks, false)
-			return nil, err
+			return nil, cleanupLegacyAzureIdentityLocks(locks, lock, err)
 		}
 		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			_ = lock.Close()
-			releaseLegacyAzureIdentityLocks(locks, false)
+			primary := managedError(ManagedCacheUnavailable, "acquire legacy Azure Identity cache lock", err)
 			if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-				return nil, managedError(ManagedCacheConflict, "acquire legacy Azure Identity cache lock", err)
+				primary = managedError(ManagedCacheConflict, "acquire legacy Azure Identity cache lock", err)
 			}
-			return nil, managedError(ManagedCacheUnavailable, "acquire legacy Azure Identity cache lock", err)
+			return nil, cleanupLegacyAzureIdentityLocks(locks, lock, primary)
 		}
 		locks = append(locks, lock)
 	}
 	return locks, nil
+}
+
+func cleanupLegacyAzureIdentityLocks(locks []*os.File, current *os.File, primary error) error {
+	errorsToJoin := []error{primary}
+	if current != nil {
+		if err := current.Close(); err != nil {
+			errorsToJoin = append(errorsToJoin, managedError(ManagedCacheUnavailable, "close failed legacy Azure Identity cache lock", err))
+		}
+	}
+	if err := releaseLegacyAzureIdentityLocks(locks, false); err != nil {
+		errorsToJoin = append(errorsToJoin, err)
+	}
+	return errors.Join(errorsToJoin...)
 }
 
 func releaseLegacyAzureIdentityLocks(locks []*os.File, remove bool) error {
@@ -242,7 +252,7 @@ func releaseLegacyAzureIdentityLocks(locks []*os.File, remove bool) error {
 }
 
 func verifyOptionalOwnedPath(path string, directory bool, mode os.FileMode, required bool) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- caller supplies an absolute path under an ownership-checked legacy cache root; this function rejects symlinks, wrong ownership, type, and mode
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) && !required {
 			return nil
