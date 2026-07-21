@@ -3,7 +3,7 @@
 > **Item:** [#44](https://github.com/nz365guy/cb365/issues/44)
 > **Depends on:** [#43](https://github.com/nz365guy/cb365/issues/43) delivering the
 > `cb365.msal-cache/v2` provider
-> **Status:** Plan complete; implementation and tenant execution pending #43
+> **Status:** T3-T6 automation implemented in PR #54; T1/T2 operator evidence pending
 > **Scope:** T3–T6 integration automation and bounded T1/T2 test-tenant evidence
 
 ## Purpose and boundaries
@@ -15,6 +15,22 @@ the v2 record amendment in
 what the integration suite and operator evidence must prove; it does not
 authorise provider implementation, a BWS mutation, Entra consent, session
 revocation, a production-profile action, or a tenant operation.
+
+## Implementation evidence
+
+PR #54 adds a Linux/cgo-only `managed_evidence` harness that is excluded from
+release builds and invoked from `test/integration`. The suite uses an in-memory
+fake BWS store and an isolated temporary root; it fails when credential-bearing
+environment variables are present and performs no Entra, Graph, prompt, BWS,
+tenant, or production-profile operation.
+
+The CI gate covers T3a/T3b typed fail-closed outcomes with zero downstream
+request counters, T4 runtime-only sentinel containment and teardown scanning,
+T5 lock contention plus stale-generation rejection, and T6 permission-before-
+read, verified readback-before-delete, failed-readback source retention, and
+logout absence checks. The sentinel and JWT-prefix detector are constructed at
+runtime so neither becomes a token-shaped repository artefact. T1/T2 remain
+operator-only under the runbook below.
 
 All automated cases use a fake BWS transport, a disposable test profile, and
 an opaque token-shaped sentinel. The sentinel must be constructed at runtime,
