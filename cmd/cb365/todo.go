@@ -55,13 +55,11 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 
 	// ── Delegated profiles: use MSAL persistent cache for silent refresh ──
 	if profile.AuthMode == config.AuthModeDelegated {
-		// Load the stored AuthenticationRecord (needed for MSAL cache lookup)
-		cache, cacheErr := auth.LoadToken(profileName)
-		if cacheErr != nil {
-			return nil, fmt.Errorf("loading token: %w", cacheErr)
+		if profile.ManagedDelegated == nil {
+			return nil, fmt.Errorf("legacy delegated profile %q is disabled; run 'cb365 auth migrate --profile %s'", profileName, profileName)
 		}
 
-		cred, credErr := auth.NewDelegatedCredentialSilent(profile, cache.AuthRecord, ipv4Only)
+		cred, credErr := auth.NewManagedDelegatedCredential(profile, ipv4Only)
 		if credErr != nil {
 			return nil, credErr
 		}
@@ -84,14 +82,6 @@ func newGraphClient() (*msgraphsdkgo.GraphServiceClient, error) {
 		})
 		if tokenErr != nil {
 			return nil, fmt.Errorf("token refresh failed — run 'cb365 auth login --profile %s' to re-authenticate: %w", profileName, tokenErr)
-		}
-
-		// Update our local cache so 'auth status' shows current token info.
-		// Persistence failure must propagate so callers fail loudly, not silently.
-		cache.AccessToken = token.Token
-		cache.ExpiresAt = token.ExpiresOn.Format(time.RFC3339)
-		if storeErr := auth.StoreToken(profileName, cache); storeErr != nil {
-			return nil, fmt.Errorf("storing refreshed token: %w", storeErr)
 		}
 
 		if flagVerbose {

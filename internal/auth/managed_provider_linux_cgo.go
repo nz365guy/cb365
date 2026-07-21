@@ -81,11 +81,10 @@ func MigrateManagedDelegated(
 	if err != nil {
 		return nil, err
 	}
-	if err := legacy.cleanupAndVerify(); err != nil {
-		result.Metadata.MigrationState = managedMigrationCleanup
-		return result, err
-	}
-	result.Metadata.MigrationState = managedMigrationComplete
+	// Persist cleanup_required in the non-secret profile before deleting any
+	// source layer. This makes interruption and config-save failures resumable
+	// while workload commands remain fail closed.
+	result.Metadata.MigrationState = managedMigrationCleanup
 	return result, nil
 }
 
@@ -197,38 +196,72 @@ func DeleteManagedDelegated(ctx context.Context, profile *config.Profile) error 
 	}
 	defer lock.Close()
 
-	if profile.ManagedDelegated != nil && profile.ManagedDelegated.SecretID != "" {
-		binding := managedBinding{
-			TenantID:      profile.TenantID,
-			ClientID:      profile.ClientID,
-			HomeAccountID: profile.ManagedDelegated.HomeAccountID,
-			Profile:       profile.Name,
-		}
-		store, closeStore, openErr := openSDKSecretStore()
-		if openErr != nil {
-			return openErr
-		}
-		defer closeStore()
-		adapter, adapterErr := newManagedCacheAdapter(
-			store,
-			binding,
-			profile.ManagedDelegated.OrganisationID,
-			profile.ManagedDelegated.ProjectID,
-			profile.ManagedDelegated.SecretID,
-			host,
-			false,
-		)
-		if adapterErr != nil {
-			return adapterErr
-		}
-		if _, _, _, readErr := adapter.readAndValidate(ctx, adapter.secretID); readErr != nil && !isManagedSecretAbsent(readErr) {
-			return readErr
-		}
-		if deleteErr := adapter.deleteAndVerify(ctx); deleteErr != nil && !isManagedSecretAbsent(deleteErr) {
-			return deleteErr
-		}
+	if err := deleteManagedRecordLocked(ctx, profile, host); err != nil {
+		return err
 	}
 	return cleanupLegacyDelegated(profile.Name)
+}
+
+// DiscardManagedDelegatedMigration removes only the newly-created BWS record.
+// It is used when non-secret migration metadata cannot be persisted; the
+// verified legacy source remains untouched and can be retried safely.
+func DiscardManagedDelegatedMigration(ctx context.Context, profile *config.Profile) error {
+	if profile == nil || profile.AuthMode != config.AuthModeDelegated || profile.ManagedDelegated == nil ||
+		profile.ManagedDelegated.MigrationState != managedMigrationCleanup {
+		return managedError(ManagedCacheInvalid, "discard delegated credential migration", nil)
+	}
+	return DiscardManagedDelegatedRecord(ctx, profile)
+}
+
+// DiscardManagedDelegatedRecord removes a newly-created BWS record without
+// touching any legacy cache. It is only a transaction rollback helper.
+func DiscardManagedDelegatedRecord(ctx context.Context, profile *config.Profile) error {
+	if profile == nil || profile.AuthMode != config.AuthModeDelegated || profile.ManagedDelegated == nil {
+		return managedError(ManagedCacheInvalid, "discard managed delegated record", nil)
+	}
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return managedError(ManagedCacheUnavailable, "resolve assigned host", err)
+	}
+	if profile.ManagedDelegated.AssignedHost != host {
+		return managedError(ManagedCacheConflict, "discard delegated credential migration on assigned host", nil)
+	}
+	lock, err := acquireManagedProfileLock(profile.Name, host)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	return deleteManagedRecordLocked(ctx, profile, host)
+}
+
+func deleteManagedRecordLocked(ctx context.Context, profile *config.Profile, host string) error {
+	if profile.ManagedDelegated == nil || profile.ManagedDelegated.SecretID == "" {
+		return nil
+	}
+	binding := managedBinding{
+		TenantID:      profile.TenantID,
+		ClientID:      profile.ClientID,
+		HomeAccountID: profile.ManagedDelegated.HomeAccountID,
+		Profile:       profile.Name,
+	}
+	store, closeStore, err := openSDKSecretStore()
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+	adapter, err := newManagedCacheAdapter(
+		store,
+		binding,
+		profile.ManagedDelegated.OrganisationID,
+		profile.ManagedDelegated.ProjectID,
+		profile.ManagedDelegated.SecretID,
+		host,
+		false,
+	)
+	if err != nil {
+		return err
+	}
+	return adapter.deleteAndVerify(ctx)
 }
 
 func loginManagedLocked(

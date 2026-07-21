@@ -32,3 +32,11 @@ func NewManagedDelegatedCredential(*config.Profile, bool) (azcore.TokenCredentia
 func DeleteManagedDelegated(context.Context, *config.Profile) error {
 	return managedUnavailableBuildError()
 }
+
+func DiscardManagedDelegatedMigration(context.Context, *config.Profile) error {
+	return managedUnavailableBuildError()
+}
+
+func DiscardManagedDelegatedRecord(context.Context, *config.Profile) error {
+	return managedUnavailableBuildError()
+}
