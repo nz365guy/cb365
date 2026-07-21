@@ -20,4 +20,14 @@ func TestManagedDelegatedStubFailsClosed(t *testing.T) {
 	if err := DeleteManagedDelegated(context.Background(), profile); err == nil || err.Error() != "managed delegated authentication unavailable on this build" {
 		t.Fatalf("unexpected delete stub error: %v", err)
 	}
+	target := ManagedChannelMessageTarget{TeamID: "team", ChannelID: "channel", MessageID: "message"}
+	if _, err := RecordManagedChannelMessageProvenance(context.Background(), profile, target); err == nil || err.Error() != "managed delegated authentication unavailable on this build" {
+		t.Fatalf("unexpected provenance record stub error: %v", err)
+	}
+	if err := VerifyManagedChannelMessageProvenance(context.Background(), profile, "reference", target); err == nil || err.Error() != "managed delegated authentication unavailable on this build" {
+		t.Fatalf("unexpected provenance verify stub error: %v", err)
+	}
+	if err := DeleteManagedChannelMessageProvenance(context.Background(), profile, "reference", target); err == nil || err.Error() != "managed delegated authentication unavailable on this build" {
+		t.Fatalf("unexpected provenance delete stub error: %v", err)
+	}
 }

@@ -284,13 +284,18 @@ Safety: Requires --confirm flag to prevent accidental broadcast to channels.`,
 		if err != nil {
 			return fmt.Errorf("sending channel message: %w", err)
 		}
+		if sent == nil || deref(sent.GetId()) == "" {
+			return fmt.Errorf("message send returned no root-message identifier; deletion provenance was not recorded")
+		}
 		if profile.AuthMode == config.AuthModeDelegated && profile.ManagedDelegated != nil {
 			target := auth.ManagedChannelMessageTarget{
 				TeamID:    teamID,
 				ChannelID: channelID,
 				MessageID: deref(sent.GetId()),
 			}
-			reference, provenanceErr := auth.RecordManagedChannelMessageProvenance(ctx, profile, target)
+			provenanceCtx, provenanceCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			reference, provenanceErr := auth.RecordManagedChannelMessageProvenance(provenanceCtx, profile, target)
+			provenanceCancel()
 			if provenanceErr != nil {
 				return fmt.Errorf("message was sent but managed deletion provenance was not recorded; do not use delete-message: %w", provenanceErr)
 			}
