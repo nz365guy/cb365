@@ -12,14 +12,6 @@ import (
 	"github.com/nz365guy/cb365/internal/graph"
 )
 
-// msalCache is the MSAL token cache shared across credential instances. On
-// Linux and Windows the init in credential_cache_other.go sets it to a
-// persistent cache that stores access tokens (~60 min) and refresh tokens
-// (~90 days) so delegated credentials renew silently. On macOS the persistent
-// backend requires cgo, which release builds do not enable, so msalCache stays
-// zero-value and MSAL falls back to in-memory only.
-var msalCache azidentity.Cache
-
 // DelegatedLoginResult holds the credential, token, and authentication record
 // from an interactive delegated login. The AuthRecord must be persisted so that
 // subsequent silent logins can look up the account in the MSAL cache.
@@ -31,10 +23,14 @@ type DelegatedLoginResult struct {
 // LoginDelegatedWithCache performs a device-code login with the MSAL persistent cache.
 // Returns the token AND the AuthenticationRecord, which MUST be stored for silent refresh.
 func LoginDelegatedWithCache(ctx context.Context, profile *config.Profile, ipv4Only bool, promptFn func(context.Context, azidentity.DeviceCodeMessage) error) (*DelegatedLoginResult, error) {
+	legacyCache, err := loadLegacyMSALCache()
+	if err != nil {
+		return nil, fmt.Errorf("initializing legacy delegated cache: %w", err)
+	}
 	opts := &azidentity.DeviceCodeCredentialOptions{
 		TenantID:   profile.TenantID,
 		ClientID:   profile.ClientID,
-		Cache:      msalCache,
+		Cache:      legacyCache,
 		UserPrompt: promptFn,
 	}
 
@@ -85,11 +81,15 @@ func NewDelegatedCredentialSilent(profile *config.Profile, authRecordJSON string
 	if err := json.Unmarshal([]byte(authRecordJSON), &record); err != nil {
 		return nil, fmt.Errorf("parsing stored authentication record: %w", err)
 	}
+	legacyCache, err := loadLegacyMSALCache()
+	if err != nil {
+		return nil, fmt.Errorf("initializing legacy delegated cache: %w", err)
+	}
 
 	opts := &azidentity.DeviceCodeCredentialOptions{
 		TenantID:             profile.TenantID,
 		ClientID:             profile.ClientID,
-		Cache:                msalCache,
+		Cache:                legacyCache,
 		AuthenticationRecord: record,
 		UserPrompt: func(_ context.Context, _ azidentity.DeviceCodeMessage) error {
 			return fmt.Errorf("interactive login required — run 'cb365 auth login --profile %s'", profile.Name)

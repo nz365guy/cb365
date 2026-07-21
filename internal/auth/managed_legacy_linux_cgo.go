@@ -106,7 +106,7 @@ func cleanupLegacyDelegated(profileName string) error {
 	if err != nil {
 		return err
 	}
-	defer releaseLegacyAzureIdentityLocks(locks, false)
+	defer func() { _ = releaseLegacyAzureIdentityLocks(locks, false) }()
 	for _, cacheFile := range cacheFiles {
 		if err := os.Remove(cacheFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache file", err)
