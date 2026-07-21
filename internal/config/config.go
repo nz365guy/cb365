@@ -22,13 +22,27 @@ const (
 
 // Profile represents a configured authentication profile
 type Profile struct {
-	Name     string   `json:"name"`
-	TenantID string   `json:"tenant_id"`
-	ClientID string   `json:"client_id"`
-	AuthMode AuthMode `json:"auth_mode"`
-	Scopes   []string `json:"scopes,omitempty"`
-	Username string   `json:"username,omitempty"`
-	Active   bool     `json:"active,omitempty"`
+	Name             string                    `json:"name"`
+	TenantID         string                    `json:"tenant_id"`
+	ClientID         string                    `json:"client_id"`
+	AuthMode         AuthMode                  `json:"auth_mode"`
+	Scopes           []string                  `json:"scopes,omitempty"`
+	Username         string                    `json:"username,omitempty"`
+	Active           bool                      `json:"active,omitempty"`
+	ManagedDelegated *ManagedDelegatedMetadata `json:"managed_delegated,omitempty"`
+}
+
+// ManagedDelegatedMetadata contains non-secret references for a delegated
+// profile whose bearer material lives exclusively in Bitwarden Secrets
+// Manager EU. None of these fields is sufficient to authenticate to either
+// Bitwarden or Entra.
+type ManagedDelegatedMetadata struct {
+	HomeAccountID  string `json:"home_account_id"`
+	SecretID       string `json:"secret_id"`
+	OrganisationID string `json:"organisation_id"`
+	ProjectID      string `json:"project_id"`
+	AssignedHost   string `json:"assigned_host"`
+	MigrationState string `json:"migration_state"`
 }
 
 // Config represents the cb365 configuration file
