@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/nz365guy/cb365/internal/config"
@@ -88,13 +89,85 @@ func DeleteManagedChannelMessageProvenance(ctx context.Context, profile *config.
 		return err
 	}
 	defer closeStore()
+	return deleteManagedChannelMessageProvenance(ctx, store, profile, binding, secretID, target, host)
+}
+
+func deleteManagedChannelMessageProvenanceLocked(ctx context.Context, profile *config.Profile, host string) error {
+	if profile == nil || profile.ManagedDelegated == nil || len(profile.ManagedDelegated.ChannelMessageProvenance) == 0 {
+		return nil
+	}
+	binding, err := managedProfileBinding(profile)
+	if err != nil {
+		return err
+	}
+	store, closeStore, err := openSDKSecretStore()
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+	return deleteManagedChannelMessageProvenanceReferences(ctx, store, profile, binding, host)
+}
+
+func deleteManagedChannelMessageProvenanceReferences(
+	ctx context.Context,
+	store managedProvenanceStore,
+	profile *config.Profile,
+	binding managedBinding,
+	host string,
+) error {
+	keys := make([]string, 0, len(profile.ManagedDelegated.ChannelMessageProvenance))
+	for key := range profile.ManagedDelegated.ChannelMessageProvenance {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	type candidate struct {
+		secretID string
+		target   ManagedChannelMessageTarget
+	}
+	validated := make([]candidate, 0, len(keys))
+	for _, lookupKey := range keys {
+		secretID := profile.ManagedDelegated.ChannelMessageProvenance[lookupKey]
+		secret, err := store.Get(ctx, secretID)
+		if err != nil {
+			return managedError(ManagedCacheUnavailable, "read channel-message provenance for logout", err)
+		}
+		if secret == nil || secret.ID != secretID ||
+			secret.OrganisationID != profile.ManagedDelegated.OrganisationID ||
+			secret.ProjectID != profile.ManagedDelegated.ProjectID {
+			return managedError(ManagedCacheInvalid, "validate channel-message provenance location for logout", nil)
+		}
+		envelope, err := unmarshalManagedChannelMessageProvenance([]byte(secret.Value))
+		if err != nil || envelope.Binding != binding || envelope.Writer != host ||
+			lookupKey != ManagedChannelMessageProvenanceKey(envelope.Target) ||
+			secret.Key != managedChannelMessageSecretKey(binding, envelope.Target) {
+			return managedError(ManagedCacheInvalid, "validate channel-message provenance binding for logout", err)
+		}
+		validated = append(validated, candidate{secretID: secretID, target: envelope.Target})
+	}
+	for _, item := range validated {
+		if err := deleteManagedChannelMessageProvenance(ctx, store, profile, binding, item.secretID, item.target, host); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteManagedChannelMessageProvenance(
+	ctx context.Context,
+	store managedProvenanceStore,
+	profile *config.Profile,
+	binding managedBinding,
+	secretID string,
+	target ManagedChannelMessageTarget,
+	host string,
+) error {
 	if err := verifyManagedChannelMessageProvenance(ctx, store, profile, binding, secretID, target, host); err != nil {
 		return err
 	}
 	if err := store.Delete(ctx, secretID); err != nil {
 		return managedError(ManagedCacheUnavailable, "delete channel-message provenance", err)
 	}
-	_, err = store.Get(ctx, secretID)
+	_, err := store.Get(ctx, secretID)
 	if !errors.Is(err, errManagedSecretNotFound) {
 		return managedError(ManagedCacheConflict, "verify channel-message provenance deletion", nil)
 	}

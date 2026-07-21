@@ -80,3 +80,55 @@ func TestManagedChannelMessageProvenanceStoreRoundTripAndExactBinding(t *testing
 		})
 	}
 }
+
+func TestManagedLogoutDeletesAndVerifiesEveryBoundProvenanceRecord(t *testing.T) {
+	store := &fakeProvenanceStore{fakeManagedStore: newFakeManagedStore()}
+	profile := testManagedProvenanceProfile()
+	binding, err := managedProfileBinding(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ManagedDelegated.ChannelMessageProvenance = make(map[string]string)
+	for index, target := range []ManagedChannelMessageTarget{
+		{TeamID: "team-a", ChannelID: "channel-a", MessageID: "message-a"},
+		{TeamID: "team-b", ChannelID: "channel-b", MessageID: "message-b"},
+	} {
+		reference, err := recordManagedChannelMessageProvenance(
+			context.Background(), store, profile, binding, target, "host",
+			func() time.Time { return time.Date(2026, 7, 21, 11, index, 0, 0, time.UTC) },
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile.ManagedDelegated.ChannelMessageProvenance[ManagedChannelMessageProvenanceKey(target)] = reference
+	}
+	if err := deleteManagedChannelMessageProvenanceReferences(context.Background(), store, profile, binding, "host"); err != nil {
+		t.Fatalf("logout provenance cleanup: %v", err)
+	}
+	if len(store.secrets) != 0 {
+		t.Fatalf("logout left %d provenance records", len(store.secrets))
+	}
+}
+
+func TestManagedLogoutRefusesUnboundProvenanceReference(t *testing.T) {
+	store := &fakeProvenanceStore{fakeManagedStore: newFakeManagedStore()}
+	profile := testManagedProvenanceProfile()
+	binding, err := managedProfileBinding(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := ManagedChannelMessageTarget{TeamID: "team", ChannelID: "channel", MessageID: "message"}
+	reference, err := recordManagedChannelMessageProvenance(
+		context.Background(), store, profile, binding, target, "host", time.Now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ManagedDelegated.ChannelMessageProvenance = map[string]string{"sha256:wrong": reference}
+	if err := deleteManagedChannelMessageProvenanceReferences(context.Background(), store, profile, binding, "host"); err == nil {
+		t.Fatal("logout deleted an unbound provenance reference")
+	}
+	if len(store.secrets) != 1 {
+		t.Fatal("logout removed provenance before its local binding was verified")
+	}
+}

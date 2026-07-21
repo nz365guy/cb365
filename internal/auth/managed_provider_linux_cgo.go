@@ -196,6 +196,9 @@ func DeleteManagedDelegated(ctx context.Context, profile *config.Profile) error 
 	}
 	defer lock.Close()
 
+	if err := deleteManagedChannelMessageProvenanceLocked(ctx, profile, host); err != nil {
+		return err
+	}
 	if err := deleteManagedRecordLocked(ctx, profile, host); err != nil {
 		return err
 	}
