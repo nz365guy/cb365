@@ -93,6 +93,8 @@ cb365 auth login \
   --tenant YOUR_TENANT_ID \
   --client YOUR_CLIENT_ID \
   --scopes Tasks.ReadWrite \
+  --bws-organization YOUR_BWS_ORGANIZATION_ID \
+  --bws-project YOUR_DEDICATED_BWS_PROJECT_ID \
   --name my-profile
 
 # Follow the device-code prompt — open the URL, enter the code, sign in
@@ -131,12 +133,25 @@ cb365 auth login \
   --tenant TENANT_ID \
   --client CLIENT_ID \
   --scopes Tasks.ReadWrite,Mail.Read,Calendars.ReadWrite \
+  --bws-organization BWS_ORGANIZATION_ID \
+  --bws-project BWS_PROJECT_ID \
   --name work
 ```
 
-Tokens auto-refresh silently for approximately 90 days via MSAL persistent cache. After 90 days (or a VM reboot), re-run the login command.
+Delegated bearer material is stored only in the profile-bound Bitwarden Secrets Manager EU record. The machine-account credential is accepted only from the injected `BWS_ACCESS_TOKEN` environment boundary; there is no CLI flag, local token-store, Azure Identity cache, or plaintext fallback. The initial managed target is Linux with cgo; unsupported builds fail closed.
 
-> **Agent note:** After one interactive login, delegated tokens auto-refresh silently for ~90 days via MSAL persistent cache (CAE-enabled). No human interaction needed during that window. For fully zero-touch workflows (e.g. CI), use [app-only auth](#app-only-client-secret) instead.
+Tokens auto-refresh silently through the BWS-backed MSAL cache, subject to Entra policy and revocation. For fully zero-touch workflows, use [app-only auth](#app-only-client-secret) instead.
+
+To move the sole remaining legacy delegated profile on a host, run an explicit resumable migration:
+
+```bash
+cb365 auth migrate \
+  --profile work \
+  --bws-organization BWS_ORGANIZATION_ID \
+  --bws-project BWS_PROJECT_ID
+```
+
+Migration verifies legacy ownership and modes before reading, proves the BWS write by readback, then removes and verifies every legacy layer. Workload commands remain disabled while cleanup is incomplete; rerun the same command to resume cleanup.
 
 ### App-Only (Client Secret)
 
@@ -177,6 +192,8 @@ cb365 auth status            # Show current token info
 cb365 auth logout --name old # Remove a profile
 cb365 todo lists list --profile work  # One-off profile override
 ```
+
+Managed delegated logout verifies the BWS record and legacy cache layers are absent. Entra session revocation is a separate administrator action.
 
 > **Naming convention:** We recommend `work-delegated` for interactive profiles and `work-app` for app-only automation. This makes it clear at a glance which auth flow a profile uses.
 
@@ -582,4 +599,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code style, testing, an
 ## Licence
 
 [MIT](LICENSE)
-

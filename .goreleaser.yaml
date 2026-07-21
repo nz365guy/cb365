@@ -8,7 +8,22 @@ before:
     - go vet ./...
 
 builds:
-  - id: cb365
+  - id: cb365-managed-linux
+    main: ./cmd/cb365/
+    binary: cb365
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: cb365-portable
     main: ./cmd/cb365/
     binary: cb365
     env:
@@ -20,6 +35,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: linux
+        goarch: amd64
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -123,4 +141,3 @@ release:
     ```
   footer: |
     **Full Changelog**: https://github.com/nz365guy/cb365/compare/v{{.PreviousTag}}...v{{.Tag}}
-

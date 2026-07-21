@@ -19,8 +19,16 @@ jobs:
         with:
           go-version: '1.25.12'
 
-      - name: Build
-        run: go build -v ./cmd/cb365/
+      - name: Verify pinned managed-provider supply chain
+        run: |
+          go mod download
+          go mod verify
+          sdk_dir="$(go env GOMODCACHE)/github.com/bitwarden/sdk-go/v2@v2.1.0"
+          echo 'bbdc2dc8c59659bc8cfc7e4a1d86bcae3f4b9be739411ff25056f99c9fa4ef31  '"$sdk_dir"'/internal/cinterface/lib/linux-x64/libbitwarden_c.a' | sha256sum -c -
+          test -f "$sdk_dir/LICENSE.txt"
+
+      - name: Build managed Linux provider (CGO_ENABLED=1)
+        run: CGO_ENABLED=1 go build -v ./cmd/cb365/
 
       - name: Cross-compile release targets (CGO_ENABLED=0)
         run: |
@@ -31,8 +39,16 @@ jobs:
             done
           done
 
-      - name: Test
-        run: go test -v ./...
+      - name: Test managed provider and verify redacted output
+        run: |
+          CGO_ENABLED=1 go test -v ./... 2>&1 | tee /tmp/test-managed.out
+          sentinel='eyJhbGciOiJub25lIn0.opaque-managed-test-sentinel'
+          if grep -F "$sentinel" /tmp/test-managed.out; then
+            echo 'managed token sentinel reached test output'; exit 1
+          fi
+
+      - name: Test unsupported provider stub (CGO_ENABLED=0)
+        run: CGO_ENABLED=0 go test -v ./...
 
       - name: Vet
         run: go vet ./...
@@ -50,6 +66,10 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/zricethezav/gitleaks/v8@latest
+
+      - name: Repository secret scan
+        run: gitleaks git --redact --no-banner
 
       - name: gosec
         run: gosec ./...

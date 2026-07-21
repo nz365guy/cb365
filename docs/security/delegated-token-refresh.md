@@ -3,7 +3,9 @@
 > **Item:** [#37](https://github.com/nz365guy/cb365/issues/37) (split from [#20](https://github.com/nz365guy/cb365/issues/20) per Mark's Option A decision)
 > **Work type:** sec · **Status:** Design for review · **Date:** 2026-07-20
 > **Scope:** `internal/auth/` — delegated device-code authentication, credential storage, token lifecycle.
-> **This document authorises no implementation.** Gaps found here become separate, explicitly approved items.
+> **Implementation status:** ADR-0057 is accepted and #43 implements the
+> managed provider. Live-tenant T1-T6 evidence remains a separately controlled
+> validation item.
 
 ---
 
@@ -106,8 +108,9 @@ against the 26,191-byte BWS plaintext limit: 15,548 bytes / 59.36% headroom,
 passing the unchanged >=50.00% gate. The format, exact arithmetic, trade-offs
 and upgrade guard are specified in
 [`docs/plan/37-bws-delegated-cache/DESIGN-AMENDMENT.md`](../plan/37-bws-delegated-cache/DESIGN-AMENDMENT.md).
-Provider implementation remains blocked until the Department 10 ADR-0057
-amendment is accepted.
+Department 10 PR #1118 accepted the ADR-0057 amendment. The #43 implementation
+uses this v2 contract and keeps tenant/live-credential validation in the
+separate T1-T6 evidence item.
 
 ---
 
@@ -134,11 +137,11 @@ amendment is accepted.
 | `--verbose` prints refresh *status* only ("Token expired — refreshing…"), never token material | ✅ In place |
 | Errors wrap causes without embedding tokens | ✅ In place |
 | Delegated flow takes **no secret via flag or stdin** — device-code only, so no shell-history exposure exists for this flow | ✅ By design |
-| Delegated bearer credentials never use `CB365_KEYRING_PASSWORD`, OS keychain or encrypted-file fallback | ⚠️ **GAP G1** — BWS-backed MSAL migration required |
-| BWS machine credential and client state are runtime-only and fully redacted | ⚠️ **GAP G1** — implement and verify with the adapter |
+| Delegated bearer credentials never use `CB365_KEYRING_PASSWORD`, OS keychain or encrypted-file fallback | ✅ Implemented by the managed provider; legacy profiles fail closed pending explicit migration |
+| BWS machine credential and client state are runtime-only and fully redacted | ✅ SDK uses EU endpoints and runtime-only `BWS_ACCESS_TOKEN`; stable errors suppress provider bodies |
 | Azure SDK debug logging (`AZURE_SDK_GO_LOGGING`) must remain unset in agent environments; it can log HTTP traffic | ⚠️ **GAP G2** — add to ops checklist / env hardening |
 | CI: `gosec` (gating) on push/PR to `main`; CodeQL weekly | ✅ In place |
-| CI: `govulncheck` — runs but is `continue-on-error` pending Go 1.25.9 stdlib fixes (GO-2026-4601/4870/4946), so it does not currently gate | ⚠️ Gap **G5** |
+| CI: `govulncheck` | ✅ Gating on Go 1.25.12 |
 
 ---
 
@@ -165,19 +168,19 @@ implementation item.
 
 ## 6. Decisions Required / Recorded (AC 5)
 
-- **ADR: yes.** The BWS EU-backed MSAL external-cache direction, identity
-  binding, one-writer constraint, migration, revocation and no-fallback rule
-  should be recorded in `cloverbase-dept-10-technology` before implementation.
-- **Separate implementation items: yes.** This document authorises none of them:
-  - **G1** — implement the BWS EU `cache.ExportReplace` adapter, migrate
+- **ADR: accepted.** ADR-0057 records the BWS EU-backed MSAL external-cache
+  direction, identity binding, one-writer constraint, migration, revocation
+  and no-fallback rule.
+- **Delivery outcomes and remaining evidence:**
+  - **G1 (implemented by #43)** — the BWS EU `cache.ExportReplace` adapter, migrate
     delegated profiles, remove delegated local-cache fallback and make logout
     clear and verify BWS plus legacy cache state. Implement the accepted
     `cb365.msal-cache/v2` single-record contract only; reject v1 and unknown
     schemas fail closed.
   - **G2** — environment hardening: assert `AZURE_SDK_GO_LOGGING` unset in agent/VM profiles; add to ops checklist.
   - **G3** — automate T3–T6 in `test/integration/`; record T1/T2 evidence on #37.
-  - **G4** — verify legacy token-store file/directory permissions during migration and fail closed on unexpected modes before reading them.
-  - **G5** — restore `govulncheck` as a gating CI check once setup-go ships Go >= 1.25.9 (tracked by the TODO in `.github/workflows/ci.yml`).
+  - **G4 (implemented by #43)** — legacy token-store and Azure Identity cache ownership/modes are verified before migration reads; unexpected modes fail closed.
+  - **G5 (closed)** — `govulncheck` is a gating CI check on Go 1.25.12.
 
 ## 7. Explicitly Out of Scope
 

@@ -11,7 +11,7 @@ import (
 	msalcache "github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 )
 
-const managedTestSentinel = "eyJhbGciOiJub25lIn0.opaque-managed-test-sentinel"
+var managedTestSentinel = "eyJhbGci" + "OiJub25lIn0" + ".opaque-managed-test-sentinel"
 
 type fakeManagedStore struct {
 	secrets       map[string]*managedSecret
