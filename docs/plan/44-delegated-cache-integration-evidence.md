@@ -41,10 +41,15 @@ For each case, capture only these secret-free artefacts:
 - BWS fake operation history containing record identifiers and generations,
   never values.
 
-At teardown, scan captured artefacts and the isolated temporary directory for
-the runtime sentinel. The scan must include stdout, stderr, logs, command
-arguments, environment values, fake-BWS state, legacy-store paths and any BWS
-client-state path. A match fails the test. The required JWT-prefix detector is
+Before teardown, assert that the runtime sentinel exists only as cache content
+inside the single designated in-memory fake bound record. No second fake
+record, fake-client state or operation-history entry may contain it. Clear that
+approved-record analogue, then scan captured artefacts and the isolated
+temporary directory for the sentinel. The scan must include stdout, stderr,
+logs, command arguments, environment values, fake-BWS client state,
+legacy-store paths and every fake-store or BWS client-state persistence path.
+A match fails the test. The scanner must never write the approved fake-record
+value to disk merely to inspect it. The required JWT-prefix detector is
 represented in source as concatenated literals (`"e" + "yJ"`) so the detector
 itself cannot become a repository artefact.
 
@@ -54,11 +59,40 @@ itself cannot become a repository artefact.
 | --- | --- | --- | --- |
 | T3a | Bound v2 record absent; invoke one unattended workload command. | Non-zero exit with the documented missing-record error class; Entra requests = 0; workload requests = 0; prompt calls = 0; legacy-store reads = 0. | Integration test plus artefact scan. |
 | T3b | Fake BWS read returns unavailable/denied; invoke the same command. | Non-zero exit with the documented unavailable error class; Entra/workload requests = 0; prompt calls = 0; no legacy fallback. | Integration test plus artefact scan. |
-| T4 | Execute T3a, T3b, T5 and T6 with the opaque sentinel present only in the fake bound record. | All captured artefacts and isolated residue paths are sentinel-free; no BWS client state remains outside the declared temporary path. | Teardown scanner and path inventory. |
-| T5 | Seed one valid bound record; run two refresh transactions behind a deterministic lock barrier so both begin from the same generation. | Exactly one write/readback succeeds; the other returns the stale-generation/conflict error class; final record generation is incremented once and contains the successful writer's digest. | Integration test with fake BWS operation history. |
+| T4 | Execute T3a, T3b, T5 and T6 with the opaque sentinel present only in the designated fake bound record when that case has a record. | Before teardown, the sentinel exists in that record only. After clearing it, all captured artefacts, fake-client state and isolated residue paths are sentinel-free; no BWS client state remains outside the declared temporary path. | In-memory containment assertion, teardown scanner and path inventory. |
+| T5a | Seed one valid bound record; start two refresh entry points and hold the winner behind a deterministic barrier after it acquires the profile lock. | Exactly one transaction crosses the lock and completes one write/readback; the contender returns the typed conflict outcome; final generation is `n+1`. | Integration test with fake lock and BWS operation histories. |
+| T5b | Let adapter A load generation `n`; advance the fake record through a second verified writer to `n+1`, then release A to export. | A fails stale-generation/digest validation before update and cannot overwrite the second writer; the final record remains the verified `n+1` value. | Integration test with an adapter/store barrier and ordered fake BWS history. |
 | T6a | Seed legacy test stores with valid, correctly permissioned fixture data; run explicit single-profile migration. | Provider verifies legacy ownership/modes before read; BWS write then readback/binding/digest verification occur before deletion; workload remains blocked until migration completes; every legacy layer is absent after success. | Integration test with ordered fake-client history and filesystem inspection. |
 | T6b | Repeat T6a with an invalid legacy file or directory owner/mode, then with BWS readback failure. | Migration fails closed before an unsafe read or before deletion respectively; no workload request; source legacy layer remains when readback fails. | Integration test plus filesystem inspection. |
 | T6c | After a migrated/login fixture, run `auth logout`. | Bound BWS record deletion is verified; delegated local fields and all legacy cache layers are absent; output says Entra session revocation is a separate operator action; no token/cache value is emitted. | Integration test plus artefact scan. |
+
+## Operate security invariant map
+
+This map is the security acceptance layer between the v2 record contract and
+the executable evidence. Passing unit tests alone is insufficient: each test
+must prove the listed control through typed outcomes, counters and ordered fake
+operations without exposing a cache value.
+
+| Test | v2 and lifecycle controls exercised | Minimum secret-free evidence | Stop / fail condition |
+| --- | --- | --- | --- |
+| T1 | Exact tenant/client/home-account/profile binding; assigned-host lock held across silent acquisition; generation advances once; `previousDigest` names the cache read under the lock; post-write schema, binding, writer, generation and cache-digest readback. | UTC/version/build/profile label, generation before and after, zero prompt count, successful typed outcome and redaction scan. | Stop before tenant execution unless #43 is merged, T3-T6 and security gates are green, and the operator confirms the non-production profile. Fail on interaction, a non-unit generation advance or an unverified write. |
+| T2 | The same exact binding and lock; revocation maps to `reauthentication_required`; no interactive fallback, local-cache fallback, retry loop or workload request. | One non-interactive invocation, typed non-zero outcome, prompt/request counts and redaction scan. | Stop after the single evidence invocation. Fail on a device-code prompt, automatic retry, workload request, raw provider error or bearer/cache output. |
+| T3a | Bound-record presence, schema and exact binding are prerequisites; absence fails closed before Entra or workload transport and cannot activate a legacy store. | `managed_cache_unavailable` (or the final #43 typed missing-record class), zero Entra/workload/prompt/legacy-read counters and sentinel-free teardown. | Fail if the class is inferred from text, any request or prompt occurs, or any legacy read is attempted. |
+| T3b | BWS read availability is a hard boundary; denial, timeout or unavailability cannot trigger device code, a workload request or local persistence. | Typed unavailable outcome, zero Entra/workload/prompt counters, fake-store operation history and sentinel-free teardown. | Fail on a wrapped SDK/HTTP response in output, fallback, retry loop, unmanaged client state or any downstream request. |
+| T4 | Delegated bearer/cache material may exist only in process memory and the one bound BWS record analogue; routine telemetry omits values, sizes and digests. | In-memory single-record containment assertion followed by clearing, artefact/path inventory and sentinel/JWT-prefix scans. | Fail on a sentinel in a second record, output, logs, argv, environment, operation history, client state, legacy path or uploaded artefact. |
+| T5a/T5b | One assigned host and one profile lock; monotonic generation; stale loaded generation/digest rejected as `managed_cache_conflict`; the winner's `previousDigest`, generation and cache digest survive readback. | Lock contention proves one transaction crosses the lock; a separate forced stale-adapter history proves exactly one verified `n+1` write, one typed stale conflict and winner-digest equality. | Fail if both concurrent entry points cross the lock, a stale adapter calls update, the loser overwrites, generation skips/repeats, the lock is released before readback, or a digest/cache value is logged. |
+| T6a/T6b | Legacy ownership and modes verified before read; migration state blocks workloads; exact binding and digest readback precede cleanup; a failed readback retains the source. | Ordered permission-check/read/write/readback/delete history, migration-state transitions, zero workload requests and filesystem absence/presence assertions. | Fail on an unsafe legacy read, deletion before verified readback, workload execution while incomplete, or source loss after any failed verification. |
+| T6c | Logout validates the bound record, deletes and proves BWS absence, then removes delegated local fields and every legacy layer while distinguishing local logout from Entra revocation. | Ordered delete/absence verification, path inventory, secret-free operator message and sentinel-free teardown. | Fail if logout reports success before every absence check, silently treats local deletion as Entra revocation, or leaves any delegated cache layer usable. |
+
+### Execution stop conditions
+
+Automated execution must not begin until #43 is merged and exposes the fake
+store, Entra/workload transports, prompt counter, lock/barrier, clock and
+isolated legacy-path seams. Stop and return to Code if a test would need a real
+BWS credential, tenant request, production profile, raw environment dump,
+unstable string matching or access to an operator home directory. T1/T2 remain
+operator-only and additionally require every precondition in their runbook;
+the automated suite cannot substitute for that evidence.
 
 Stable error-class names and the precise command entry point are implementation
 details owned by #43, but must be asserted as typed/sentinel errors rather than
