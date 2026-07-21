@@ -562,6 +562,7 @@ var authMigrateCmd = &cobra.Command{
 			case "cleanup_required":
 				if err := auth.ResumeManagedDelegatedMigration(context.Background(), profile); err != nil {
 					return err
+				}
 				profile.ManagedDelegated.MigrationState = "complete"
 				if err := cfg.Save(); err != nil {
 					return fmt.Errorf("saving completed migration state: %w", err)
