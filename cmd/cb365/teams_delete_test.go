@@ -22,6 +22,7 @@ var validTeamsDeleteTarget = auth.ManagedChannelMessageTarget{
 }
 
 type teamsDeleteRecorder struct {
+	t            *testing.T
 	loadCalls    int
 	verifyCalls  int
 	tokenCalls   int
@@ -42,7 +43,7 @@ type teamsDeleteRecorder struct {
 	consumed   auth.ManagedChannelMessageTarget
 }
 
-func newTeamsDeleteRecorder() *teamsDeleteRecorder {
+func newTeamsDeleteRecorder(t *testing.T) *teamsDeleteRecorder {
 	profile := &config.Profile{
 		Name:     "managed-test",
 		TenantID: "tenant-test",
@@ -62,6 +63,7 @@ func newTeamsDeleteRecorder() *teamsDeleteRecorder {
 		},
 	}
 	return &teamsDeleteRecorder{
+		t:          t,
 		cfg:        &config.Config{Profiles: map[string]*config.Profile{profile.Name: profile}},
 		profile:    profile,
 		httpResult: teamsDeleteHTTPResult{Attempted: true, Status: http.StatusNoContent, CorrelationID: "correlation-test"},
@@ -78,7 +80,7 @@ func (r *teamsDeleteRecorder) dependencies() teamsDeleteDependencies {
 			r.verifyCalls++
 			r.verified = target
 			if reference != "provenance-secret" {
-				t.Fatalf("unexpected provenance reference %q", reference)
+				r.t.Fatalf("unexpected provenance reference %q", reference)
 			}
 			return r.verifyErr
 		},
@@ -90,7 +92,7 @@ func (r *teamsDeleteRecorder) dependencies() teamsDeleteDependencies {
 			r.postCalls++
 			r.posted = target
 			if token != "opaque-token-sentinel" {
-				t.Fatal("delete path did not use the acquired in-memory token")
+				r.t.Fatal("delete path did not use the acquired in-memory token")
 			}
 			return r.httpResult
 		},
@@ -98,7 +100,7 @@ func (r *teamsDeleteRecorder) dependencies() teamsDeleteDependencies {
 			r.consumeCalls++
 			r.consumed = target
 			if reference != "provenance-secret" {
-				t.Fatalf("unexpected consumed provenance reference %q", reference)
+				r.t.Fatalf("unexpected consumed provenance reference %q", reference)
 			}
 			return r.consumeErr
 		},
@@ -125,7 +127,7 @@ func TestTeamsDeleteLocalGuardsMakeZeroDependencyCalls(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			recorder := newTeamsDeleteRecorder()
+			recorder := newTeamsDeleteRecorder(t)
 			result, err := executeTeamsDelete(context.Background(), test.options, recorder.dependencies())
 			if test.wantErr && err == nil {
 				t.Fatal("expected error")
@@ -155,7 +157,7 @@ func TestTeamsDeleteRejectsUnsupportedProfilesBeforeCredentialOrGraph(t *testing
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			recorder := newTeamsDeleteRecorder()
+			recorder := newTeamsDeleteRecorder(t)
 			test.mutate(recorder.profile)
 			_, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 			if err == nil {
@@ -173,7 +175,7 @@ func TestTeamsDeleteRejectsUnsupportedProfilesBeforeCredentialOrGraph(t *testing
 
 func TestTeamsDeleteFailsClosedBeforeGraphOnProvenanceOrTokenFailure(t *testing.T) {
 	t.Run("missing provenance", func(t *testing.T) {
-		recorder := newTeamsDeleteRecorder()
+		recorder := newTeamsDeleteRecorder(t)
 		recorder.profile.ManagedDelegated.ChannelMessageProvenance = nil
 		_, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 		if err == nil || recorder.verifyCalls != 0 || recorder.tokenCalls != 0 || recorder.postCalls != 0 {
@@ -181,7 +183,7 @@ func TestTeamsDeleteFailsClosedBeforeGraphOnProvenanceOrTokenFailure(t *testing.
 		}
 	})
 	t.Run("rejected provenance", func(t *testing.T) {
-		recorder := newTeamsDeleteRecorder()
+		recorder := newTeamsDeleteRecorder(t)
 		recorder.verifyErr = errors.New("raw BWS response sentinel")
 		_, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 		if err == nil || strings.Contains(err.Error(), "raw BWS") || recorder.tokenCalls != 0 || recorder.postCalls != 0 {
@@ -189,7 +191,7 @@ func TestTeamsDeleteFailsClosedBeforeGraphOnProvenanceOrTokenFailure(t *testing.
 		}
 	})
 	t.Run("token failure", func(t *testing.T) {
-		recorder := newTeamsDeleteRecorder()
+		recorder := newTeamsDeleteRecorder(t)
 		recorder.tokenErr = errors.New("raw identity response sentinel")
 		_, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 		if err == nil || strings.Contains(err.Error(), "raw identity") || recorder.postCalls != 0 || recorder.consumeCalls != 0 {
@@ -199,7 +201,7 @@ func TestTeamsDeleteFailsClosedBeforeGraphOnProvenanceOrTokenFailure(t *testing.
 }
 
 func TestTeamsDeleteSuccessUsesExactTargetOnceAndConsumesProvenance(t *testing.T) {
-	recorder := newTeamsDeleteRecorder()
+	recorder := newTeamsDeleteRecorder(t)
 	result, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -232,7 +234,7 @@ func TestTeamsDeleteAmbiguousAndHTTPFailuresNeverRetry(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			recorder := newTeamsDeleteRecorder()
+			recorder := newTeamsDeleteRecorder(t)
 			recorder.httpResult = test.httpResult
 			result, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 			if err == nil || result.Class != test.wantClass {
@@ -247,7 +249,7 @@ func TestTeamsDeleteAmbiguousAndHTTPFailuresNeverRetry(t *testing.T) {
 
 func TestTeamsDeleteAuditOrRetirementFailureDoesNotRepeatPost(t *testing.T) {
 	t.Run("retirement", func(t *testing.T) {
-		recorder := newTeamsDeleteRecorder()
+		recorder := newTeamsDeleteRecorder(t)
 		recorder.consumeErr = errors.New("provider response sentinel")
 		result, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 		if err == nil || result.Class != "provenance_retirement_failed" || recorder.postCalls != 1 || recorder.consumeCalls != 1 {
@@ -255,7 +257,7 @@ func TestTeamsDeleteAuditOrRetirementFailureDoesNotRepeatPost(t *testing.T) {
 		}
 	})
 	t.Run("audit", func(t *testing.T) {
-		recorder := newTeamsDeleteRecorder()
+		recorder := newTeamsDeleteRecorder(t)
 		recorder.auditErr = errors.New("disk response sentinel")
 		_, err := executeTeamsDelete(context.Background(), teamsDeleteOptions{Target: validTeamsDeleteTarget, Confirm: true}, recorder.dependencies())
 		if err == nil || strings.Contains(err.Error(), "disk response") || recorder.postCalls != 1 || recorder.auditCalls != 1 {
