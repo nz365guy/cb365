@@ -47,7 +47,7 @@ You can. cb365 is a wrapper around the same Microsoft Graph API. But cb365 handl
 
 **From source (requires Go 1.24+):**
 
-> **Note:** Distro-packaged Go (e.g. `apt install golang-go`) is often too old. Download Go 1.24+ from [go.dev/dl](https://go.dev/dl/) if your system version is below 1.24.
+> **Note:** Distro-packaged Go (e.g. `apt install golang-go`) is often too old. Download Go 1.24+ from [go.dev/dl](http://web.archive.org/web/20260717090915/https://go.dev/dl/) if your system version is below 1.24.
 
 ```bash
 go install github.com/nz365guy/cb365/cmd/cb365@latest
@@ -71,7 +71,7 @@ sudo mv cb365 /usr/local/bin/
 
 ### Register an Entra ID App (5 minutes)
 
-1. Open the [Microsoft Entra admin center](https://entra.microsoft.com)
+1. Open the [Microsoft Entra admin center](http://web.archive.org/web/20260721174911/https://entra.microsoft.com/)
 2. Navigate to **Identity → Applications → App registrations → New registration**
 3. Configure:
    - **Name:** `cb365` (or your preference)
