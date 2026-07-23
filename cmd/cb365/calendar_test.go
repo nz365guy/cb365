@@ -36,6 +36,37 @@ func TestParseRFC3339StrictRejectsBare(t *testing.T) {
 	}
 }
 
+func TestGraphDateTimePartsUsesSupportedUTCZone(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        time.Time
+		wantDateTime string
+	}{
+		{
+			name:         "numeric positive offset",
+			input:        time.Date(2026, 4, 10, 9, 0, 0, 0, time.FixedZone("Local", 12*60*60)),
+			wantDateTime: "2026-04-09T21:00:00",
+		},
+		{
+			name:         "numeric negative offset",
+			input:        time.Date(2026, 4, 10, 9, 0, 0, 0, time.FixedZone("", -5*60*60)),
+			wantDateTime: "2026-04-10T14:00:00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDateTime, gotTimeZone := graphDateTimeParts(tt.input)
+			if gotDateTime != tt.wantDateTime {
+				t.Fatalf("graphDateTimeParts() datetime = %q, want %q", gotDateTime, tt.wantDateTime)
+			}
+			if gotTimeZone != "UTC" {
+				t.Fatalf("graphDateTimeParts() timezone = %q, want UTC", gotTimeZone)
+			}
+		})
+	}
+}
+
 func TestRejectPastEvent(t *testing.T) {
 	past := time.Now().Add(-24 * time.Hour)
 	err := rejectPastEvent(past, "create")
