@@ -162,8 +162,9 @@ func hasTimeOverlap(newStart, newEnd, existStart, existEnd time.Time) bool {
 
 func formatEventJSON(evt models.Eventable) map[string]interface{} {
 	item := map[string]interface{}{
-		"id":      deref(evt.GetId()),
-		"subject": deref(evt.GetSubject()),
+		"id":         deref(evt.GetId()),
+		"subject":    deref(evt.GetSubject()),
+		"categories": append([]string{}, evt.GetCategories()...),
 	}
 
 	if evt.GetStart() != nil {

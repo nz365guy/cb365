@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 )
 
 // ─── Unit tests (safety rules, no Graph API needed) ───
@@ -64,6 +66,20 @@ func TestGraphDateTimePartsUsesSupportedUTCZone(t *testing.T) {
 				t.Fatalf("graphDateTimeParts() timezone = %q, want UTC", gotTimeZone)
 			}
 		})
+	}
+}
+
+func TestFormatEventJSONIncludesCategories(t *testing.T) {
+	event := models.NewEvent()
+	event.SetCategories([]string{"Agent Meeting", "Customer"})
+
+	item := formatEventJSON(event)
+	categories, ok := item["categories"].([]string)
+	if !ok {
+		t.Fatalf("formatEventJSON() categories type = %T, want []string", item["categories"])
+	}
+	if len(categories) != 2 || categories[0] != "Agent Meeting" || categories[1] != "Customer" {
+		t.Fatalf("formatEventJSON() categories = %#v", categories)
 	}
 }
 
