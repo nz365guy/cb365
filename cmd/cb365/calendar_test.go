@@ -74,15 +74,15 @@ func TestHasTimeOverlap(t *testing.T) {
 	base := time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name                               string
-		newStart, newEnd, exStart, exEnd    time.Time
-		want                               bool
+		name                             string
+		newStart, newEnd, exStart, exEnd time.Time
+		want                             bool
 	}{
 		{"exact overlap", base, base.Add(time.Hour), base, base.Add(time.Hour), true},
-		{"partial overlap start", base, base.Add(time.Hour), base.Add(30*time.Minute), base.Add(90*time.Minute), true},
-		{"no overlap before", base, base.Add(time.Hour), base.Add(2*time.Hour), base.Add(3*time.Hour), false},
-		{"no overlap after", base.Add(2*time.Hour), base.Add(3*time.Hour), base, base.Add(time.Hour), false},
-		{"adjacent no overlap", base, base.Add(time.Hour), base.Add(time.Hour), base.Add(2*time.Hour), false},
+		{"partial overlap start", base, base.Add(time.Hour), base.Add(30 * time.Minute), base.Add(90 * time.Minute), true},
+		{"no overlap before", base, base.Add(time.Hour), base.Add(2 * time.Hour), base.Add(3 * time.Hour), false},
+		{"no overlap after", base.Add(2 * time.Hour), base.Add(3 * time.Hour), base, base.Add(time.Hour), false},
+		{"adjacent no overlap", base, base.Add(time.Hour), base.Add(time.Hour), base.Add(2 * time.Hour), false},
 	}
 	for _, tt := range tests {
 		got := hasTimeOverlap(tt.newStart, tt.newEnd, tt.exStart, tt.exEnd)
@@ -91,4 +91,3 @@ func TestHasTimeOverlap(t *testing.T) {
 		}
 	}
 }
-

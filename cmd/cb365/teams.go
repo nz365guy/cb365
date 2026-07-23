@@ -424,12 +424,16 @@ var teamsChatSendCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		chatFlag, _ := cmd.Flags().GetString("chat")
 		bodyFlag, _ := cmd.Flags().GetString("body")
+		confirmFlag, _ := cmd.Flags().GetBool("confirm")
 
 		if chatFlag == "" {
 			return fmt.Errorf("--chat is required")
 		}
 		if bodyFlag == "" {
 			return fmt.Errorf("--body is required")
+		}
+		if !confirmFlag && !flagDryRun {
+			return fmt.Errorf("chat messages are visible to chat members — pass --confirm to send")
 		}
 
 		client, err := newGraphClient()
@@ -508,6 +512,7 @@ func init() {
 	// teams chat send
 	teamsChatSendCmd.Flags().String("chat", "", "Chat ID (required)")
 	teamsChatSendCmd.Flags().String("body", "", "Message body text (required)")
+	teamsChatSendCmd.Flags().Bool("confirm", false, "Confirm sending to the chat (required safety flag)")
 	teamsChatCmd.AddCommand(teamsChatSendCmd)
 
 	// Wire up

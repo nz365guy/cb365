@@ -43,7 +43,7 @@ func TestResolveWorkspaceID(t *testing.T) {
 	cfg := &loopConfig{
 		Workspaces: []loopWorkspace{
 			{ID: "b!abc123", Name: "Contoso", DisplayName: "Contoso"},
-			{ID: "b!def456", Name: "Pages", DisplayName: "Pages (mark)", Owner: "mark@test.com"},
+			{ID: "b!def456", Name: "Pages", DisplayName: "Pages (user)", Owner: "user@example.com"},
 		},
 	}
 
@@ -71,7 +71,6 @@ func TestResolveWorkspaceID(t *testing.T) {
 		t.Error("resolve should fail for nonexistent workspace")
 	}
 }
-
 
 func TestLoopPagesDeleteRequiresForce(t *testing.T) {
 	cmd := loopPagesDeleteCmd

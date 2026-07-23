@@ -115,7 +115,6 @@ func TestOnedriveLsPathAndItemIDFlags(t *testing.T) {
 	}
 }
 
-
 func TestOnedriveDeleteRequiresForce(t *testing.T) {
 	cmd := onedriveDeleteCmd
 	forceFlag := cmd.Flags().Lookup("force")

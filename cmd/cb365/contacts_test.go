@@ -26,7 +26,6 @@ func TestGetInternalDomainForContacts(t *testing.T) {
 	}
 }
 
-
 func TestContactsCreateRequiresName(t *testing.T) {
 	cmd := contactsCreateCmd
 	if cmd.Flags().Lookup("given-name") == nil {

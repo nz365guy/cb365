@@ -100,7 +100,6 @@ func TestTeamsCommandStructure(t *testing.T) {
 	}
 }
 
-
 func TestTeamsAuditFooterExists(t *testing.T) {
 	if teamsAuditFooter == "" {
 		t.Fatal("teamsAuditFooter must not be empty")

@@ -504,9 +504,9 @@ var mailSearchCmd = &cobra.Command{
 		searchStr := fmt.Sprintf("\"%s\"", mailSearchQuery)
 		reqConfig := &users.ItemMessagesRequestBuilderGetRequestConfiguration{
 			QueryParameters: &users.ItemMessagesRequestBuilderGetQueryParameters{
-				Search:  &searchStr,
-				Top:     &mailSearchMax,
-				Select:  []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview"},
+				Search: &searchStr,
+				Top:    &mailSearchMax,
+				Select: []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview"},
 			},
 		}
 
@@ -612,6 +612,3 @@ func init() {
 	mailCmd.AddCommand(mailSendCmd)
 	mailCmd.AddCommand(mailSearchCmd)
 }
-
-
-

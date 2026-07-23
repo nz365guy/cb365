@@ -13,9 +13,23 @@ Thanks for your interest in contributing to cb365. This document covers the proc
 
 ## Development Requirements
 
-- **Go 1.24+**
-- **gosec** — `go install github.com/securego/gosec/v2/cmd/gosec@latest`
-- **govulncheck** — `go install golang.org/x/vuln/cmd/govulncheck@latest`
+- **Go 1.25.12**
+- **gosec v2.28.0** — `go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0`
+- **govulncheck v1.1.4** — `go install golang.org/x/vuln/cmd/govulncheck@v1.1.4`
+- **gitleaks v8.30.1** — `go install github.com/zricethezav/gitleaks/v8@v8.30.1`
+
+## Public Repository Boundary
+
+This repository contains only reusable product code and public documentation.
+Do not commit organization names, real tenant or client IDs, user addresses,
+private hostnames, operational paths, business plans, production evidence,
+customer data, credentials, tokens, or secret-manager identifiers. Use clearly
+synthetic placeholders in code, tests, issues, pull requests, and examples.
+
+Before submitting, inspect both the current tree and the commits in your branch.
+If private or security-sensitive information was pushed, stop and contact the
+maintainers through a private channel; deleting the file in a later commit does
+not remove it from Git history.
 
 ## Code Style
 
@@ -57,6 +71,9 @@ gosec ./...
 
 # Vulnerability check
 govulncheck ./...
+
+# Secret scan, including Git history
+gitleaks git --redact --no-banner
 ```
 
 CI runs all of these automatically on every push and PR.
@@ -69,8 +86,9 @@ All contributions must meet these requirements:
 |------|-------------|
 | Build | `go build` succeeds on Linux, macOS, and Windows |
 | Tests | `go test ./...` passes with no failures |
-| Security | `gosec` reports zero high/critical issues |
+| Security | `gosec` reports zero issues |
 | Vulnerabilities | `govulncheck` reports zero issues in project code |
+| Repository boundary | No private/business content or secret findings in the tree or branch history |
 | Token safety | No tokens, secrets, or credentials appear in output at any verbosity |
 | Dry-run | Every write command supports `--dry-run` and it is tested |
 | JSON output | Every command produces valid JSON with `--json` |
@@ -116,4 +134,3 @@ Do **not** open a public issue for security vulnerabilities. See [SECURITY.md](S
 ## Licence
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
-

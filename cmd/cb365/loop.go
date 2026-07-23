@@ -76,12 +76,19 @@ func resolveWorkspaceID(cfg *loopConfig, nameOrID string) (*loopWorkspace, error
 			return &cfg.Workspaces[i], nil
 		}
 	}
-	// Try name match (case-insensitive)
+	// Try name match (case-insensitive), but never guess between duplicates.
 	target := strings.ToLower(nameOrID)
+	matches := make([]int, 0, 1)
 	for i, ws := range cfg.Workspaces {
 		if strings.ToLower(ws.Name) == target || strings.ToLower(ws.DisplayName) == target {
-			return &cfg.Workspaces[i], nil
+			matches = append(matches, i)
 		}
+	}
+	if len(matches) == 1 {
+		return &cfg.Workspaces[matches[0]], nil
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("workspace name %q is ambiguous; use an exact workspace ID", nameOrID)
 	}
 	return nil, fmt.Errorf("workspace %q not found — run 'cb365 loop workspaces list' to see available workspaces", nameOrID)
 }
@@ -185,8 +192,8 @@ The workspace can be specified by name or container ID.
 Uses app-only auth via the Graph drives API.
 
 Examples:
-  cb365 loop pages list --workspace "Team Notes"
-  cb365 loop pages list --workspace "Microsoft Innovation Podcast" --json`,
+  cb365 loop pages list --workspace @workspace.txt
+  cb365 loop pages list --workspace @workspace.txt --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		folderFlag, _ := cmd.Flags().GetString("folder")
@@ -297,12 +304,13 @@ var loopPagesGetCmd = &cobra.Command{
 	Long: `Download a Loop page (.loop file) from a workspace.
 
 Examples:
-  cb365 loop pages get --workspace "Team Notes" --page ITEM_ID --output ./page.loop
-  cb365 loop pages get --workspace "Team Notes" --page ITEM_ID     # prints to stdout`,
+  cb365 loop pages get --workspace @workspace.txt --page ITEM_ID --output @local-path.txt
+  cb365 loop pages get --workspace @workspace.txt --page ITEM_ID     # prints to stdout`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pageFlag, _ := cmd.Flags().GetString("page")
 		outputFlag, _ := cmd.Flags().GetString("output")
+		forceFlag, _ := cmd.Flags().GetBool("force")
 
 		if wsFlag == "" {
 			return fmt.Errorf("--workspace is required")
@@ -363,9 +371,9 @@ Examples:
 				os.Remove(tmpPath) // #nosec G104
 				return fmt.Errorf("closing temp file: %w", closeErr)
 			}
-			if err := os.Rename(tmpPath, outputFlag); err != nil {
+			if err := commitTempFile(tmpPath, outputFlag, forceFlag); err != nil {
 				os.Remove(tmpPath) // #nosec G104
-				return fmt.Errorf("moving temp file: %w", err)
+				return err
 			}
 
 			format := output.Resolve(flagJSON, flagPlain)
@@ -386,7 +394,6 @@ Examples:
 	},
 }
 
-
 // ──────────────────────────────────────────────
 //  loop pages delete (move to recycle bin)
 // ──────────────────────────────────────────────
@@ -398,7 +405,7 @@ var loopPagesDeleteCmd = &cobra.Command{
 This does NOT permanently delete — items can be recovered.
 
 Examples:
-  cb365 loop pages delete --workspace "Team Notes" --page ITEM_ID --force`,
+  cb365 loop pages delete --workspace @workspace.txt --page ITEM_ID --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pageFlag, _ := cmd.Flags().GetString("page")
@@ -480,8 +487,8 @@ other document types to the workspace drive.
 Safety: --force required to overwrite. 4MB simple upload limit.
 
 Examples:
-  cb365 loop pages upload --workspace "Team Notes" --file ./page.loop --path "LoopAppData/page.loop"
-  cb365 loop pages upload --workspace "Team Notes" --file ./notes.loop --path "LoopAppData/notes.loop" --force`,
+  cb365 loop pages upload --workspace @workspace.txt --file @local-path.txt --path @remote-path.txt
+  cb365 loop pages upload --workspace @workspace.txt --file @local-path.txt --path @remote-path.txt --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		fileFlag, _ := cmd.Flags().GetString("file")
@@ -547,6 +554,9 @@ Examples:
 			if existErr == nil {
 				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
 			}
+			if !isGraphNotFound(existErr) {
+				return fmt.Errorf("checking whether destination exists: %w", existErr)
+			}
 		}
 
 		if flagDryRun {
@@ -590,7 +600,7 @@ var loopPagesMkdirCmd = &cobra.Command{
 	Long: `Create a new folder in a Loop workspace.
 
 Examples:
-  cb365 loop pages mkdir --workspace "Team Notes" --path "LoopAppData/Projects"`,
+  cb365 loop pages mkdir --workspace @workspace.txt --path @remote-path.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -692,6 +702,7 @@ func init() {
 	loopPagesGetCmd.Flags().String("workspace", "", "Workspace name or container ID (required)")
 	loopPagesGetCmd.Flags().String("page", "", "Page item ID (required)")
 	loopPagesGetCmd.Flags().String("output", "", "Output file path (omit for stdout)")
+	loopPagesGetCmd.Flags().Bool("force", false, "Overwrite an existing output file")
 	loopPagesCmd.AddCommand(loopPagesGetCmd)
 
 	// loop pages delete
@@ -716,4 +727,3 @@ func init() {
 	loopCmd.AddCommand(loopWorkspacesCmd)
 	loopCmd.AddCommand(loopPagesCmd)
 }
-

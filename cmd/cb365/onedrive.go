@@ -69,7 +69,7 @@ var onedriveLsCmd = &cobra.Command{
 
 Examples:
   cb365 onedrive ls                    # List root
-  cb365 onedrive ls --path "/Documents"
+  cb365 onedrive ls --path @remote-path.txt
   cb365 onedrive ls --item-id ABC123   # By drive item ID`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -264,7 +264,7 @@ Safety: Downloads to a temp file first, then moves into place.
 Will not overwrite existing files without --force.
 
 Examples:
-  cb365 onedrive get --path "/Documents/report.pdf" --output ./report.pdf
+  cb365 onedrive get --path @remote-path.txt --output @local-path.txt
   cb365 onedrive get --item-id ABC123 --output ./file.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -343,9 +343,9 @@ Examples:
 			return fmt.Errorf("closing temp file: %w", closeErr)
 		}
 
-		if err := os.Rename(tmpPath, outputFlag); err != nil {
+		if err := commitTempFile(tmpPath, outputFlag, forceFlag); err != nil {
 			os.Remove(tmpPath) // #nosec G104 — cleanup best effort
-			return fmt.Errorf("moving temp file to %s: %w", outputFlag, err)
+			return err
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -377,8 +377,8 @@ Safety:
   - --dry-run to preview
 
 Examples:
-  cb365 onedrive upload --file ./report.pdf --path "/Documents/report.pdf"
-  cb365 onedrive upload --file ./data.csv --path "/Uploads/data.csv" --force`,
+  cb365 onedrive upload --file @local-path.txt --path @remote-path.txt
+  cb365 onedrive upload --file @local-path.txt --path @remote-path.txt --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fileFlag, _ := cmd.Flags().GetString("file")
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -430,6 +430,9 @@ Examples:
 			if existErr == nil {
 				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
 			}
+			if !isGraphNotFound(existErr) {
+				return fmt.Errorf("checking whether destination exists: %w", existErr)
+			}
 		}
 
 		if flagDryRun {
@@ -468,7 +471,6 @@ Examples:
 	},
 }
 
-
 // ──────────────────────────────────────────────
 //  onedrive delete (move to recycle bin)
 // ──────────────────────────────────────────────
@@ -483,7 +485,7 @@ and can be recovered. Requires --force to confirm.
 Permanent deletion of active files is never permitted.
 
 Examples:
-  cb365 onedrive delete --path "/Documents/old-report.pdf" --force
+  cb365 onedrive delete --path @remote-path.txt --force
   cb365 onedrive delete --item-id ABC123 --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -559,8 +561,8 @@ var onedriveMkdirCmd = &cobra.Command{
 	Long: `Create a new folder in OneDrive.
 
 Examples:
-  cb365 onedrive mkdir --path "/Documents/Reports"
-  cb365 onedrive mkdir --path "/Projects/2026" --json`,
+  cb365 onedrive mkdir --path @remote-path.txt
+  cb365 onedrive mkdir --path @remote-path.txt --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pathFlag, _ := cmd.Flags().GetString("path")
 
@@ -665,4 +667,3 @@ func init() {
 	onedriveMkdirCmd.Flags().String("path", "", "Folder path to create (required)")
 	onedriveCmd.AddCommand(onedriveMkdirCmd)
 }
-

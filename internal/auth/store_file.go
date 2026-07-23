@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	fileStoreName = "tokens.enc"
-	pbkdf2Iter    = 210_000 // OWASP 2023 recommendation for SHA-256
-	pbkdf2KeyLen  = 32      // AES-256
-	saltLen       = 16
+	fileStoreName    = "tokens.enc"
+	fileStoreVersion = 2
+	pbkdf2Iter       = 210_000 // OWASP 2023 recommendation for SHA-256
+	pbkdf2KeyLen     = 32      // AES-256
+	saltLen          = 16
 )
 
 // fileBackend stores encrypted tokens in ~/.config/cb365/tokens.enc
@@ -32,6 +33,7 @@ type fileBackend struct {
 
 // encryptedStore is the on-disk format
 type encryptedStore struct {
+	Version int               `json:"version"`
 	Salt    []byte            `json:"salt"`    // PBKDF2 salt (hex would also work but base64 via json is fine)
 	Entries map[string][]byte `json:"entries"` // profile → AES-256-GCM ciphertext (nonce prepended)
 }
@@ -63,6 +65,7 @@ func (f *fileBackend) load() (*encryptedStore, error) {
 				return nil, fmt.Errorf("generating salt: %w", err)
 			}
 			return &encryptedStore{
+				Version: fileStoreVersion,
 				Salt:    salt,
 				Entries: make(map[string][]byte),
 			}, nil
@@ -92,11 +95,28 @@ func (f *fileBackend) save(store *encryptedStore) error {
 	}
 
 	// Write atomically via temp file
-	tmp := f.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	tmpFile, err := os.CreateTemp(dir, ".tokens-*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating token store temporary file: %w", err)
+	}
+	tmp := tmpFile.Name()
+	defer os.Remove(tmp) // #nosec G104 -- best-effort cleanup
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("restricting token store temporary file: %w", err)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
 		return fmt.Errorf("writing token store: %w", err)
 	}
-	if err := os.Rename(tmp, f.path); err != nil {
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("syncing token store: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing token store: %w", err)
+	}
+	if err := replaceFile(tmp, f.path); err != nil {
 		_ = os.Remove(tmp) // #nosec G104 — best-effort cleanup on failed rename
 		return fmt.Errorf("replacing token store: %w", err)
 	}
@@ -107,7 +127,7 @@ func (f *fileBackend) deriveKey(salt []byte) []byte {
 	return pbkdf2.Key([]byte(f.password), salt, pbkdf2Iter, pbkdf2KeyLen, sha256.New)
 }
 
-func (f *fileBackend) encrypt(key, plaintext []byte) ([]byte, error) {
+func (f *fileBackend) encrypt(key, plaintext, additionalData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -121,10 +141,10 @@ func (f *fileBackend) encrypt(key, plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 	// Prepend nonce to ciphertext
-	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+	return gcm.Seal(nonce, nonce, plaintext, additionalData), nil
 }
 
-func (f *fileBackend) decrypt(key, ciphertext []byte) ([]byte, error) {
+func (f *fileBackend) decrypt(key, ciphertext, additionalData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -138,7 +158,7 @@ func (f *fileBackend) decrypt(key, ciphertext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
 	nonce, ct := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	return gcm.Open(nil, nonce, ct, nil)
+	return gcm.Open(nil, nonce, ct, additionalData)
 }
 
 // --- tokenStore interface ---
@@ -152,8 +172,12 @@ func (f *fileBackend) Set(profile string, data []byte) error {
 		return err
 	}
 
+	if store.Version != fileStoreVersion && len(store.Entries) != 0 {
+		return fmt.Errorf("legacy token store is not profile-bound; log out existing app-only profiles and authenticate again")
+	}
+	store.Version = fileStoreVersion
 	key := f.deriveKey(store.Salt)
-	encrypted, err := f.encrypt(key, data)
+	encrypted, err := f.encrypt(key, data, []byte(profile))
 	if err != nil {
 		return fmt.Errorf("encrypting token: %w", err)
 	}
@@ -176,8 +200,11 @@ func (f *fileBackend) Get(profile string) ([]byte, error) {
 		return nil, errNotFound
 	}
 
+	if store.Version != fileStoreVersion {
+		return nil, fmt.Errorf("legacy token store is not profile-bound; log out profile %q and authenticate again", profile)
+	}
 	key := f.deriveKey(store.Salt)
-	return f.decrypt(key, encrypted)
+	return f.decrypt(key, encrypted, []byte(profile))
 }
 
 func (f *fileBackend) Delete(profile string) error {

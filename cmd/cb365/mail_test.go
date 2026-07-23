@@ -62,4 +62,3 @@ func TestIsDelegatedProfileErrorsWithoutConfig(t *testing.T) {
 	// This will either work (if config exists) or error — either is acceptable
 	_ = err
 }
-
