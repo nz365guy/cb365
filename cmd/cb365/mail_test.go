@@ -41,8 +41,8 @@ func TestExternalRecipientsNoDomain(t *testing.T) {
 	os.Unsetenv("CB365_INTERNAL_DOMAIN")
 
 	ext := externalRecipients("anyone@gmail.com", "")
-	if len(ext) != 0 {
-		t.Errorf("externalRecipients with no domain set: got %v, want empty", ext)
+	if len(ext) != 1 || ext[0] != "anyone@gmail.com" {
+		t.Errorf("externalRecipients with no domain set: got %v, want conservative classification", ext)
 	}
 }
 
@@ -56,9 +56,19 @@ func TestGetInternalDomain(t *testing.T) {
 	}
 }
 
-func TestIsDelegatedProfileErrorsWithoutConfig(t *testing.T) {
-	// Without a valid config, isDelegatedProfile should return an error
-	_, err := isDelegatedProfile()
-	// This will either work (if config exists) or error — either is acceptable
-	_ = err
+func TestMailSendRequiresConfirmBeforeAuthentication(t *testing.T) {
+	oldTo, oldSubject, oldBody, oldConfirm := mailSendTo, mailSendSubject, mailSendBody, mailSendConfirm
+	defer func() {
+		mailSendTo, mailSendSubject, mailSendBody, mailSendConfirm = oldTo, oldSubject, oldBody, oldConfirm
+	}()
+
+	mailSendTo = "recipient@example.com"
+	mailSendSubject = "test"
+	mailSendBody = "test"
+	mailSendConfirm = false
+
+	err := mailSendCmd.RunE(mailSendCmd, nil)
+	if err == nil || err.Error() != "--confirm is required to send mail (safety guard against accidental sends)" {
+		t.Fatalf("expected universal confirmation guard, got %v", err)
+	}
 }

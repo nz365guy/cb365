@@ -133,7 +133,8 @@ release:
     cosign verify-blob \
       --certificate-identity "https://github.com/nz365guy/cb365/.github/workflows/release.yml@refs/tags/v{{.Version}}" \
       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-      --bundle checksums.txt.sigstore.json \
+      --certificate checksums.txt.pem \
+      --signature checksums.txt.sig \
       checksums.txt
 
     # Inspect SBOM

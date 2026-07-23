@@ -10,13 +10,13 @@ import (
 
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
-	"github.com/nz365guy/cb365/internal/config"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
 
 // getInternalDomain returns the organisation's email domain for external-send warnings.
-// Set CB365_INTERNAL_DOMAIN to enable (e.g. "example.com"). Empty = no warnings.
+// Set CB365_INTERNAL_DOMAIN to enable (e.g. "example.com"). When empty,
+// recipients are conservatively classified as external or unclassified.
 func getInternalDomain() string {
 	return os.Getenv("CB365_INTERNAL_DOMAIN")
 }
@@ -62,23 +62,6 @@ func makeRecipient(email string) models.Recipientable {
 	return r
 }
 
-// isDelegatedProfile checks if the active profile uses delegated auth.
-func isDelegatedProfile() (bool, error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return false, err
-	}
-	profileName := flagProfile
-	if profileName == "" {
-		profileName = cfg.ActiveProfile
-	}
-	profile, ok := cfg.Profiles[profileName]
-	if !ok {
-		return false, fmt.Errorf("profile %q not found", profileName)
-	}
-	return profile.AuthMode == config.AuthModeDelegated, nil
-}
-
 // countRecipients counts total recipients from comma-separated to and cc strings.
 func countRecipients(to, cc string) int {
 	count := 0
@@ -100,14 +83,13 @@ func countRecipients(to, cc string) int {
 // externalRecipients returns addresses not matching the internal domain.
 func externalRecipients(to, cc string) []string {
 	var ext []string
+	domain := strings.ToLower(strings.TrimSpace(getInternalDomain()))
 	all := strings.Split(to+","+cc, ",")
 	for _, addr := range all {
 		trimmed := strings.TrimSpace(addr)
-		domain := getInternalDomain()
-		if domain == "" {
-			continue // no internal domain configured — skip external check
-		}
-		if trimmed != "" && !strings.HasSuffix(strings.ToLower(trimmed), "@"+domain) {
+		// Without an internal-domain policy, classify every non-empty address as
+		// external/unknown rather than silently disabling the safety signal.
+		if trimmed != "" && (domain == "" || !strings.HasSuffix(strings.ToLower(trimmed), "@"+domain)) {
 			ext = append(ext, trimmed)
 		}
 	}
@@ -376,13 +358,10 @@ var mailSendCmd = &cobra.Command{
 			return fmt.Errorf("--to, --subject, and --body are required")
 		}
 
-		// Safety: delegated mode requires --confirm
-		delegated, err := isDelegatedProfile()
-		if err != nil {
-			return err
-		}
-		if delegated && !mailSendConfirm {
-			return fmt.Errorf("delegated mode requires --confirm to send mail (safety guard against accidental sends)")
+		// Safety: every outbound message requires an explicit acknowledgement,
+		// regardless of delegated or app-only authentication mode.
+		if !mailSendConfirm {
+			return fmt.Errorf("--confirm is required to send mail (safety guard against accidental sends)")
 		}
 
 		// Safety: >10 recipients requires --force
@@ -391,10 +370,14 @@ var mailSendCmd = &cobra.Command{
 			return fmt.Errorf("sending to %d recipients requires --force (blast radius guard)", totalRecipients)
 		}
 
-		// Safety: warn about external recipients
+		// Safety: warn about external or unclassified recipients.
 		ext := externalRecipients(mailSendTo, mailSendCC)
 		if len(ext) > 0 {
-			output.Info(fmt.Sprintf("Note: sending to %d external recipient(s): %s", len(ext), strings.Join(ext, ", ")))
+			classification := "external"
+			if strings.TrimSpace(getInternalDomain()) == "" {
+				classification = "external or unclassified (CB365_INTERNAL_DOMAIN is not set)"
+			}
+			output.Info(fmt.Sprintf("Note: sending to %d %s recipient(s): %s", len(ext), classification, strings.Join(ext, ", ")))
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)

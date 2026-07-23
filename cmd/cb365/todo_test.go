@@ -12,15 +12,55 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+var integrationBinary string
+
+func TestMain(m *testing.M) {
+	buildDir, err := os.MkdirTemp("", "cb365-integration-binary-")
+	if err != nil {
+		panic(err)
+	}
+	integrationBinary = filepath.Join(buildDir, "cb365")
+	if runtime.GOOS == "windows" {
+		integrationBinary += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", integrationBinary, ".")
+	build.Stdout = os.Stdout
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		_ = os.RemoveAll(buildDir)
+		panic(err)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(buildDir)
+	os.Exit(code)
+}
+
+func integrationEnvironment() []string {
+	allowed := []string{
+		"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT",
+		"PATH", "TEMP", "TMP", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+		"CB365_KEYRING_PASSWORD", "CB365_IPV4_ONLY", "CB365_INTERNAL_DOMAIN", "CB365_PROFILE",
+	}
+	env := make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
+}
+
 // cb365 runs the CLI and returns stdout, stderr, and any error.
 func cb365(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
-	cmd := exec.Command(os.Getenv("HOME")+"/.local/bin/cb365", args...)
-	cmd.Env = os.Environ()
+	cmd := exec.Command(integrationBinary, args...)
+	cmd.Env = integrationEnvironment()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -239,7 +279,9 @@ func TestDryRunDoesNotCreate(t *testing.T) {
 // --- Force guard ---
 
 func TestForceGuardBlocksDelete(t *testing.T) {
-	_, _, err := cb365(t, "todo", "lists", "delete", "--list", "Tasks")
+	// Use an impossible disposable identifier so a force-guard regression cannot
+	// delete an operator's real default list.
+	_, _, err := cb365(t, "todo", "lists", "delete", "--list", "00000000-0000-0000-0000-000000000000")
 	if err == nil {
 		t.Fatal("expected error without --force")
 	}

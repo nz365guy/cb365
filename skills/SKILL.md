@@ -86,7 +86,7 @@ cb365 mail get MESSAGE_ID --json
 # Search messages
 cb365 mail search --query @query.txt --json
 
-# Send mail (requires --confirm in delegated mode)
+# Send mail (always requires --confirm)
 cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --confirm
 
 # Preview before sending

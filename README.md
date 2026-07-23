@@ -420,7 +420,7 @@ Calendar is the most protected workload — miscreating or deleting events has r
 
 ### Mail Safety (6 rules)
 
-- `--confirm` required in delegated mode
+- `--confirm` required for every outbound message in delegated and app-only modes
 - Recipient count guard (>10 requires `--force`)
 - External domain warning
 - `[Sent via cb365]` audit footer on all outbound messages
@@ -556,7 +556,7 @@ Get-SPOContainer -OwningApplicationId YOUR_CLIENT_ID
 | `CB365_KEYRING_PASSWORD` | Passphrase for encrypted file token storage (headless Linux) | — |
 | `CB365_IPV4_ONLY` | Force IPv4 for all HTTPS connections | `false` |
 | `CB365_TIMEZONE` | Default timezone for calendar operations | System timezone |
-| `CB365_INTERNAL_DOMAIN` | Your organisation's email domain (for external recipient warnings) | — |
+| `CB365_INTERNAL_DOMAIN` | Your organisation's email domain (unset recipients are conservatively treated as external/unclassified) | — |
 
 ---
 
@@ -588,11 +588,11 @@ go test ./...
 
 ```bash
 # Static analysis
-go install github.com/securego/gosec/v2/cmd/gosec@latest
+go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
 gosec ./...
 
 # Vulnerability check
-go install golang.org/x/vuln/cmd/govulncheck@latest
+go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 govulncheck ./...
 ```
 
