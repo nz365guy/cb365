@@ -56,6 +56,16 @@ func parseRFC3339Strict(s string) (time.Time, error) {
 	return t, nil
 }
 
+// graphDateTimeParts converts an absolute instant into a Graph-safe
+// DateTimeTimeZone pair. RFC3339 numeric offsets can parse to a Go location
+// named "Local" or to an unnamed fixed offset, neither of which Microsoft
+// Graph accepts as a TimeZone value. UTC is universally supported and
+// preserves the instant represented by the caller's explicit offset.
+func graphDateTimeParts(t time.Time) (string, string) {
+	utc := t.UTC()
+	return utc.Format("2006-01-02T15:04:05"), "UTC"
+}
+
 // rejectPastEvent enforces: no modifications to past events (uses CB365_TIMEZONE or system time).
 func rejectPastEvent(startTime time.Time, action string) error {
 	if startTime.Before(localNow()) {
@@ -607,13 +617,15 @@ var calCreateCmd = &cobra.Command{
 		evt.SetSubject(ptr(calCreateSubject))
 
 		start := models.NewDateTimeTimeZone()
-		start.SetDateTime(ptr(startTime.Format("2006-01-02T15:04:05")))
-		start.SetTimeZone(ptr(startTime.Location().String()))
+		startDateTime, startTimeZone := graphDateTimeParts(startTime)
+		start.SetDateTime(ptr(startDateTime))
+		start.SetTimeZone(ptr(startTimeZone))
 		evt.SetStart(start)
 
 		end := models.NewDateTimeTimeZone()
-		end.SetDateTime(ptr(endTime.Format("2006-01-02T15:04:05")))
-		end.SetTimeZone(ptr(endTime.Location().String()))
+		endDateTime, endTimeZone := graphDateTimeParts(endTime)
+		end.SetDateTime(ptr(endDateTime))
+		end.SetTimeZone(ptr(endTimeZone))
 		evt.SetEnd(end)
 
 		if calCreateBody != "" {
@@ -772,8 +784,9 @@ var calUpdateCmd = &cobra.Command{
 				return err
 			}
 			s := models.NewDateTimeTimeZone()
-			s.SetDateTime(ptr(startTime.Format("2006-01-02T15:04:05")))
-			s.SetTimeZone(ptr(startTime.Location().String()))
+			startDateTime, startTimeZone := graphDateTimeParts(startTime)
+			s.SetDateTime(ptr(startDateTime))
+			s.SetTimeZone(ptr(startTimeZone))
 			patch.SetStart(s)
 			hasUpdate = true
 		}
@@ -783,8 +796,9 @@ var calUpdateCmd = &cobra.Command{
 				return err
 			}
 			e := models.NewDateTimeTimeZone()
-			e.SetDateTime(ptr(endTime.Format("2006-01-02T15:04:05")))
-			e.SetTimeZone(ptr(endTime.Location().String()))
+			endDateTime, endTimeZone := graphDateTimeParts(endTime)
+			e.SetDateTime(ptr(endDateTime))
+			e.SetTimeZone(ptr(endTimeZone))
 			patch.SetEnd(e)
 			hasUpdate = true
 		}
