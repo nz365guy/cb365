@@ -109,6 +109,8 @@ func readIndirectFlag(cmd *cobra.Command, source string) (string, error) {
 	if source == "-" {
 		reader = cmd.InOrStdin()
 	} else {
+		// #nosec G304 -- reading the explicit operator-supplied @path is this
+		// feature's purpose; the data is size-bounded and rejected on NUL.
 		file, err := os.Open(source)
 		if err != nil {
 			return "", fmt.Errorf("opening indirect input %q: %w", source, err)
