@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25.12'
+
+      - name: Verify pinned managed-provider supply chain
+        run: |
+          go mod download
+          go mod verify
+          sdk_dir="$(go env GOMODCACHE)/github.com/bitwarden/sdk-go/v2@v2.1.0"
+          echo 'bbdc2dc8c59659bc8cfc7e4a1d86bcae3f4b9be739411ff25056f99c9fa4ef31  '"$sdk_dir"'/internal/cinterface/lib/linux-x64/libbitwarden_c.a' | sha256sum -c -
+          test -f "$sdk_dir/LICENSE.txt"
+
+      - name: Build managed Linux provider (CGO_ENABLED=1)
+        run: CGO_ENABLED=1 go build -v ./cmd/cb365/
+
+      - name: Cross-compile release targets (CGO_ENABLED=0)
+        run: |
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              echo "build $os/$arch"
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o /dev/null ./cmd/cb365/
+            done
+          done
+
+      - name: Test managed provider and verify redacted output
+        run: |
+          CGO_ENABLED=1 go test -v ./... 2>&1 | tee /tmp/test-managed.out
+          sentinel='e''yJhbGciOiJub25lIn0.opaque-managed-test-sentinel'
+          if grep -F "$sentinel" /tmp/test-managed.out; then
+            echo 'managed token sentinel reached test output'; exit 1
+          fi
+
+      - name: Run credential-free T3-T6 evidence suite
+        run: |
+          env -u BWS_ACCESS_TOKEN \
+            -u AZURE_CLIENT_SECRET \
+            -u AZURE_CLIENT_CERTIFICATE_PASSWORD \
+            -u CB365_KEYRING_PASSWORD \
+            CGO_ENABLED=1 go test -tags managed_evidence -v ./test/integration/
+
+      - name: Test unsupported provider stub (CGO_ENABLED=0)
+        run: CGO_ENABLED=0 go test -v ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25.12'
+
+      - name: Install security tools
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+      - name: Repository secret scan
+        run: gitleaks git --redact --no-banner
+
+      - name: gosec
+        run: gosec ./...
+
+      - name: govulncheck
+        run: govulncheck ./...

@@ -1,0 +1,81 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/spf13/cobra"
+)
+
+// Set by goreleaser ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+var (
+	flagJSON    bool
+	flagPlain   bool
+	flagProfile string
+	flagVerbose bool
+	flagDryRun  bool
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "cb365",
+	Short: "Enterprise CLI for Microsoft 365 via Microsoft Graph",
+	Long: `cb365 is an Entra ID-authenticated CLI for Microsoft 365.
+Designed for agent consumption with structured JSON output.
+
+Supports Microsoft To Do, Planner, Mail, Calendar, Contacts,
+Teams, Loop, SharePoint, and OneDrive via the Microsoft Graph API.`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+}
+
+func init() {
+	rootCmd.PersistentFlags().BoolVar(&flagJSON, "json", false, "Output JSON to stdout")
+	rootCmd.PersistentFlags().BoolVar(&flagPlain, "plain", false, "Output stable parseable text (TSV)")
+	rootCmd.PersistentFlags().StringVar(&flagProfile, "profile", "", "Profile name override")
+	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "Preview write operations without executing")
+
+	rootCmd.AddCommand(authCmd)
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(todoCmd)
+	rootCmd.AddCommand(mailCmd)
+	rootCmd.AddCommand(calendarCmd)
+	rootCmd.AddCommand(contactsCmd)
+	rootCmd.AddCommand(plannerCmd)
+	rootCmd.AddCommand(teamsCmd)
+	rootCmd.AddCommand(sharepointCmd)
+	rootCmd.AddCommand(onedriveCmd)
+	rootCmd.AddCommand(loopCmd)
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version information",
+	Run: func(cmd *cobra.Command, args []string) {
+		if flagJSON {
+			info := map[string]string{
+				"version": version,
+				"commit":  commit,
+				"date":    date,
+				"url":     "https://github.com/nz365guy/cb365",
+			}
+			data, _ := json.MarshalIndent(info, "", "  ")
+			fmt.Println(string(data))
+			return
+		}
+		cmd.Println("cb365 version " + version)
+		if commit != "none" {
+			cmd.Println("commit: " + commit)
+		}
+		if date != "unknown" {
+			cmd.Println("built:  " + date)
+		}
+		cmd.Println("https://github.com/nz365guy/cb365")
+	},
+}

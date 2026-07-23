@@ -1,0 +1,216 @@
+package main
+
+import (
+	"testing"
+
+	abstractions "github.com/microsoft/kiota-abstractions-go"
+	"github.com/microsoft/kiota-abstractions-go/serialization"
+)
+
+func TestSharepointCommandStructure(t *testing.T) {
+	if !sharepointCmd.HasSubCommands() {
+		t.Fatal("sharepoint command should have subcommands")
+	}
+	found := map[string]bool{}
+	for _, sub := range sharepointCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"sites", "lists", "files"} {
+		if !found[expected] {
+			t.Errorf("sharepoint missing subcommand %q", expected)
+		}
+	}
+}
+
+func TestSharepointAliases(t *testing.T) {
+	found := false
+	for _, a := range sharepointCmd.Aliases {
+		if a == "sp" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("sharepoint missing alias 'sp'")
+	}
+}
+
+func TestSharepointSitesGetRequiresSite(t *testing.T) {
+	if sharepointSitesGetCmd.Flags().Lookup("site") == nil {
+		t.Fatal("sharepoint sites get missing --site flag")
+	}
+}
+
+func TestSharepointListsListRequiresSite(t *testing.T) {
+	if sharepointListsListCmd.Flags().Lookup("site") == nil {
+		t.Fatal("sharepoint lists list missing --site flag")
+	}
+}
+
+func TestSharepointListsItemsListRequiresSiteAndList(t *testing.T) {
+	if sharepointListsItemsListCmd.Flags().Lookup("site") == nil {
+		t.Fatal("missing --site")
+	}
+	if sharepointListsItemsListCmd.Flags().Lookup("list") == nil {
+		t.Fatal("missing --list")
+	}
+}
+
+func TestSharepointListsItemsCreateRequiresFields(t *testing.T) {
+	if sharepointListsItemsCreateCmd.Flags().Lookup("site") == nil {
+		t.Fatal("missing --site")
+	}
+	if sharepointListsItemsCreateCmd.Flags().Lookup("list") == nil {
+		t.Fatal("missing --list")
+	}
+	if sharepointListsItemsCreateCmd.Flags().Lookup("field") == nil {
+		t.Fatal("missing --field")
+	}
+}
+
+func TestSharepointListsItemsUpdateRequiresItem(t *testing.T) {
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("item") == nil {
+		t.Fatal("missing --item")
+	}
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("field") == nil {
+		t.Fatal("missing --field")
+	}
+}
+
+func TestSharepointListsItemsDeleteRequiresForce(t *testing.T) {
+	f := sharepointListsItemsDeleteCmd.Flags().Lookup("force")
+	if f == nil {
+		t.Fatal("missing --force")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--force default should be false, got %s", f.DefValue)
+	}
+}
+
+func TestSharepointFilesStructure(t *testing.T) {
+	found := map[string]bool{}
+	for _, sub := range sharepointFilesCmd.Commands() {
+		found[sub.Name()] = true
+	}
+	for _, expected := range []string{"list", "get", "upload"} {
+		if !found[expected] {
+			t.Errorf("sharepoint files missing subcommand %q", expected)
+		}
+	}
+}
+
+func TestSharepointFilesUploadSafetyFlags(t *testing.T) {
+	if sharepointFilesUploadCmd.Flags().Lookup("force") == nil {
+		t.Fatal("missing --force on upload")
+	}
+	if sharepointFilesUploadCmd.Flags().Lookup("file") == nil {
+		t.Fatal("missing --file on upload")
+	}
+	if sharepointFilesUploadCmd.Flags().Lookup("path") == nil {
+		t.Fatal("missing --path on upload")
+	}
+}
+
+func TestSharepointFilesGetSafetyFlags(t *testing.T) {
+	if sharepointFilesGetCmd.Flags().Lookup("output") == nil {
+		t.Fatal("missing --output on get")
+	}
+	if sharepointFilesGetCmd.Flags().Lookup("force") == nil {
+		t.Fatal("missing --force on get")
+	}
+}
+
+func TestSharepointSitesListSearchFlag(t *testing.T) {
+	if sharepointSitesListCmd.Flags().Lookup("search") == nil {
+		t.Fatal("missing --search")
+	}
+}
+
+func TestFormatSiteURL(t *testing.T) {
+	tests := []struct{ input, expected string }{
+		{"https://contoso.sharepoint.com", "https://contoso.sharepoint.com"},
+		{"", "(unknown)"},
+	}
+	for _, tt := range tests {
+		if result := formatSiteURL(tt.input); result != tt.expected {
+			t.Errorf("formatSiteURL(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestSharepointListsItemsCreateHasFieldURL(t *testing.T) {
+	if sharepointListsItemsCreateCmd.Flags().Lookup("field-url") == nil {
+		t.Fatal("create missing --field-url")
+	}
+}
+
+func TestSharepointListsItemsUpdateHasFieldURL(t *testing.T) {
+	if sharepointListsItemsUpdateCmd.Flags().Lookup("field-url") == nil {
+		t.Fatal("update missing --field-url")
+	}
+}
+
+func TestApplyURLFields(t *testing.T) {
+	fields := map[string]interface{}{}
+	if err := applyURLFields([]string{"LinkedIn=https://example.com/in/jane-doe"}, fields); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	obj, ok := fields["LinkedIn"].(*serialization.UntypedObject)
+	if !ok {
+		t.Fatalf("LinkedIn should be *serialization.UntypedObject, got %T", fields["LinkedIn"])
+	}
+	props := obj.GetValue()
+	urlNode, ok := props["Url"].(*serialization.UntypedString)
+	if !ok {
+		t.Fatalf("Url should be *serialization.UntypedString, got %T", props["Url"])
+	}
+	if v := urlNode.GetValue(); v == nil || *v != "https://example.com/in/jane-doe" {
+		t.Errorf("Url value = %v, want the supplied URL", v)
+	}
+	if _, ok := props["Description"].(*serialization.UntypedString); !ok {
+		t.Error("Description should be set")
+	}
+}
+
+func TestApplyURLFieldsRejectsMalformed(t *testing.T) {
+	fields := map[string]interface{}{}
+	if err := applyURLFields([]string{"NoEqualsSign"}, fields); err == nil {
+		t.Error("expected error for malformed field-url")
+	}
+}
+
+func TestSharePointURLFieldConfigsAddPreferHeader(t *testing.T) {
+	createConfig := sharePointListItemCreateConfig([]string{"Profile=https://example.com"})
+	if createConfig == nil {
+		t.Fatal("create config should be set when field-url is present")
+	}
+	assertPreferHeader(t, createConfig.Headers)
+
+	updateConfig := sharePointListItemUpdateConfig([]string{"Profile=https://example.com"})
+	if updateConfig == nil {
+		t.Fatal("update config should be set when field-url is present")
+	}
+	assertPreferHeader(t, updateConfig.Headers)
+}
+
+func TestSharePointURLFieldConfigsAreNilWithoutURLFields(t *testing.T) {
+	if config := sharePointListItemCreateConfig(nil); config != nil {
+		t.Fatal("create config should be nil without field-url values")
+	}
+	if config := sharePointListItemUpdateConfig(nil); config != nil {
+		t.Fatal("update config should be nil without field-url values")
+	}
+}
+
+func assertPreferHeader(t *testing.T, headers *abstractions.RequestHeaders) {
+	t.Helper()
+	if headers == nil {
+		t.Fatal("headers should be set")
+	}
+	values := headers.Get("Prefer")
+	for _, value := range values {
+		if value == sharePointURLFieldPreferHeader {
+			return
+		}
+	}
+	t.Fatalf("Prefer header = %v, want %q", values, sharePointURLFieldPreferHeader)
+}
