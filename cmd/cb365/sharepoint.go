@@ -118,7 +118,7 @@ var sharepointSitesListCmd = &cobra.Command{
 	Long: `Search SharePoint sites by keyword. Without --search, lists root sites.
 
 Examples:
-  cb365 sharepoint sites list --search "Marketing"
+  cb365 sharepoint sites list --search @query.txt
   cb365 sharepoint sites list --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		searchFlag, _ := cmd.Flags().GetString("search")
@@ -389,8 +389,8 @@ var sharepointListsItemsCreateCmd = &cobra.Command{
 	Long: `Create a new item in a SharePoint list with field values.
 
 Examples:
-  cb365 sp lists items create --site SITE --list LIST --field Title="New Item" --field Status="Active"
-  cb365 sp lists items create --site SITE --list LIST --field Title="Jane Doe" --field-url Profile="https://example.com/in/jane-doe"`,
+  cb365 sp lists items create --site SITE --list LIST --field @fields.txt
+  cb365 sp lists items create --site SITE --list LIST --field @fields.txt --field-url @urls.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
@@ -466,8 +466,8 @@ var sharepointListsItemsUpdateCmd = &cobra.Command{
 	Long: `Update field values on an existing SharePoint list item.
 
 Examples:
-  cb365 sp lists items update --site SITE --list LIST --item ITEM --field Status="Complete"
-  cb365 sp lists items update --site SITE --list LIST --item ITEM --field-url Profile="https://example.com/in/jane-doe"`,
+  cb365 sp lists items update --site SITE --list LIST --item ITEM --field @fields.txt
+  cb365 sp lists items update --site SITE --list LIST --item ITEM --field-url @urls.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		listFlag, _ := cmd.Flags().GetString("list")
@@ -600,7 +600,7 @@ var sharepointFilesListCmd = &cobra.Command{
 
 Examples:
   cb365 sp files list --site SITE_ID
-  cb365 sp files list --site SITE_ID --path "/Shared Documents/Reports"`,
+  cb365 sp files list --site SITE_ID --path @remote-path.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		pathFlag, _ := cmd.Flags().GetString("path")
@@ -751,9 +751,9 @@ var sharepointFilesGetCmd = &cobra.Command{
 			os.Remove(tmpPath) // #nosec G104
 			return fmt.Errorf("closing temp file: %w", closeErr)
 		}
-		if err := os.Rename(tmpPath, outputFlag); err != nil {
+		if err := commitTempFile(tmpPath, outputFlag, forceFlag); err != nil {
 			os.Remove(tmpPath) // #nosec G104
-			return fmt.Errorf("moving temp file: %w", err)
+			return err
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)
@@ -779,7 +779,7 @@ var sharepointFilesUploadCmd = &cobra.Command{
 Safety: 4MB simple upload limit. --force required to overwrite.
 
 Examples:
-  cb365 sp files upload --site SITE_ID --file ./report.pdf --path "/Shared Documents/report.pdf"`,
+  cb365 sp files upload --site SITE_ID --file @local-path.txt --path @remote-path.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		siteFlag, _ := cmd.Flags().GetString("site")
 		fileFlag, _ := cmd.Flags().GetString("file")
@@ -828,6 +828,9 @@ Examples:
 			_, existErr := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Get(ctx, nil)
 			if existErr == nil {
 				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
+			}
+			if !isGraphNotFound(existErr) {
+				return fmt.Errorf("checking whether destination exists: %w", existErr)
 			}
 		}
 

@@ -27,15 +27,14 @@ var authCmd = &cobra.Command{
 // --- auth login ---
 
 var (
-	loginTenant       string
-	loginClient       string
-	loginScopes       []string
-	loginName         string
-	loginMode         string
-	loginClientSecret string
-	loginCertificate  string
-	loginBWSOrg       string
-	loginBWSProject   string
+	loginTenant      string
+	loginClient      string
+	loginScopes      []string
+	loginName        string
+	loginMode        string
+	loginCertificate string
+	loginBWSOrg      string
+	loginBWSProject  string
 )
 
 var authLoginCmd = &cobra.Command{
@@ -130,16 +129,20 @@ var authLoginCmd = &cobra.Command{
 				certPathToStore = loginCertificate
 			} else {
 				// Client credentials flow — secret required
+				// Accept secrets only from stdin. Command-line arguments are visible
+				// in process listings, shell history, and common telemetry.
+				output.Info("Reading client secret from stdin...")
+				secret := make([]byte, 4096)
+				n, readErr := cmd.InOrStdin().Read(secret)
+				if readErr != nil || n == 0 {
+					return fmt.Errorf("a client secret on stdin or --certificate is required for app-only mode")
+				}
+				loginClientSecret := strings.TrimSpace(string(secret[:n]))
+				for i := range secret {
+					secret[i] = 0
+				}
 				if loginClientSecret == "" {
-					// Try reading from stdin (for piped input)
-					output.Info("Reading client secret from stdin...")
-					var secret []byte
-					secret = make([]byte, 1024)
-					n, readErr := cmd.InOrStdin().Read(secret)
-					if readErr != nil || n == 0 {
-						return fmt.Errorf("--client-secret or --certificate is required for app-only mode")
-					}
-					loginClientSecret = strings.TrimSpace(string(secret[:n]))
+					return fmt.Errorf("client secret read from stdin is empty")
 				}
 
 				output.Info(fmt.Sprintf("Authenticating profile %q via client credentials...", profileName))
@@ -702,7 +705,6 @@ func init() {
 	authLoginCmd.Flags().StringSliceVar(&loginScopes, "scopes", nil, "Graph API scopes (e.g. Tasks.ReadWrite,Mail.Read)")
 	authLoginCmd.Flags().StringVar(&loginName, "name", "", "Profile name (default: 'default')")
 	authLoginCmd.Flags().StringVar(&loginMode, "mode", "delegated", "Auth mode: delegated (device-code) or app-only (client credentials)")
-	authLoginCmd.Flags().StringVar(&loginClientSecret, "client-secret", "", "Client secret for app-only mode (omit to read from stdin)")
 	authLoginCmd.Flags().StringVar(&loginCertificate, "certificate", "", "Path to PEM file with certificate and private key (app-only mode)")
 	authLoginCmd.Flags().StringVar(&loginBWSOrg, "bws-organization", "", "Bitwarden Secrets Manager organization ID (delegated mode)")
 	authLoginCmd.Flags().StringVar(&loginBWSProject, "bws-project", "", "Dedicated Bitwarden Secrets Manager project ID (delegated mode)")

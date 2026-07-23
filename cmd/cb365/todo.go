@@ -182,10 +182,17 @@ func resolveListID(ctx context.Context, client *msgraphsdkgo.GraphServiceClient,
 	}
 
 	target := strings.ToLower(nameOrID)
+	matches := make([]string, 0, 1)
 	for _, list := range result.GetValue() {
 		if strings.ToLower(deref(list.GetDisplayName())) == target {
-			return deref(list.GetId()), nil
+			matches = append(matches, deref(list.GetId()))
 		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("task list name %q is ambiguous; use an exact list ID", nameOrID)
 	}
 
 	return "", fmt.Errorf("task list %q not found", nameOrID)

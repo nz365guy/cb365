@@ -28,7 +28,7 @@ func contactEmailsString(emails []models.EmailAddressable) string {
 }
 
 // formatContactJSON builds a JSON-serialisable map from a Contact.
-func formatContactJSON(c models.Contactable) map[string]interface{} {
+func formatContactJSON(c models.Contactable, includePrivate bool) map[string]interface{} {
 	item := map[string]interface{}{
 		"id":           deref(c.GetId()),
 		"display_name": deref(c.GetDisplayName()),
@@ -69,7 +69,7 @@ func formatContactJSON(c models.Contactable) map[string]interface{} {
 	if len(c.GetBusinessPhones()) > 0 {
 		item["business_phones"] = c.GetBusinessPhones()
 	}
-	if len(c.GetHomePhones()) > 0 {
+	if includePrivate && len(c.GetHomePhones()) > 0 {
 		item["home_phones"] = c.GetHomePhones()
 	}
 
@@ -80,7 +80,7 @@ func formatContactJSON(c models.Contactable) map[string]interface{} {
 var contactSelectFields = []string{
 	"id", "displayName", "givenName", "surname", "emailAddresses",
 	"companyName", "jobTitle", "department", "mobilePhone",
-	"businessPhones", "homePhones",
+	"businessPhones",
 }
 
 // ──────────────────────────────────────────────
@@ -135,7 +135,7 @@ var contactsListCmd = &cobra.Command{
 		case output.FormatJSON:
 			items := make([]map[string]interface{}, 0, len(contacts))
 			for _, c := range contacts {
-				items = append(items, formatContactJSON(c))
+				items = append(items, formatContactJSON(c, false))
 			}
 			return output.JSON(items)
 
@@ -208,7 +208,7 @@ var contactsGetCmd = &cobra.Command{
 
 		switch format {
 		case output.FormatJSON:
-			item := formatContactJSON(c)
+			item := formatContactJSON(c, contactsGetIncludePrivate)
 			if contactsGetIncludePrivate {
 				// Private fields: only included with --include-private
 				if c.GetPersonalNotes() != nil {
@@ -235,11 +235,11 @@ var contactsGetCmd = &cobra.Command{
 			if c.GetBusinessAddress() != nil {
 				addr := c.GetBusinessAddress()
 				item["business_address"] = map[string]string{
-					"street":       deref(addr.GetStreet()),
-					"city":         deref(addr.GetCity()),
-					"state":        deref(addr.GetState()),
-					"country":      deref(addr.GetCountryOrRegion()),
-					"postal_code":  deref(addr.GetPostalCode()),
+					"street":      deref(addr.GetStreet()),
+					"city":        deref(addr.GetCity()),
+					"state":       deref(addr.GetState()),
+					"country":     deref(addr.GetCountryOrRegion()),
+					"postal_code": deref(addr.GetPostalCode()),
 				}
 			}
 			return output.JSON(item)
@@ -324,7 +324,7 @@ var contactsSearchCmd = &cobra.Command{
 		case output.FormatJSON:
 			items := make([]map[string]interface{}, 0, len(contacts))
 			for _, c := range contacts {
-				items = append(items, formatContactJSON(c))
+				items = append(items, formatContactJSON(c, false))
 			}
 			return output.JSON(map[string]interface{}{
 				"query":   contactsSearchQuery,
@@ -367,7 +367,6 @@ var contactsSearchCmd = &cobra.Command{
 //  Wire up commands + flags
 // ══════════════════════════════════════════════
 
-
 // ──────────────────────────────────────────────
 //  contacts create
 // ──────────────────────────────────────────────
@@ -378,8 +377,8 @@ var contactsCreateCmd = &cobra.Command{
 	Long: `Create a new Outlook contact.
 
 Examples:
-  cb365 contacts create --given-name "Jane" --surname "Doe" --email "jane@example.com"
-  cb365 contacts create --given-name "John" --surname "Smith" --email "john@acme.com" --company "Acme Corp" --job-title "CEO" --phone "+64 21 555 1234"`,
+  cb365 contacts create --given-name @given.txt --surname @surname.txt --email @email.txt
+  cb365 contacts create --given-name @given.txt --surname @surname.txt --email @email.txt --company @company.txt --job-title @job-title.txt --phone @phone.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		givenName, _ := cmd.Flags().GetString("given-name")
 		surname, _ := cmd.Flags().GetString("surname")
@@ -449,7 +448,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(formatContactJSON(created))
+			return output.JSON(formatContactJSON(created, false))
 		default:
 			output.Success(fmt.Sprintf("Created contact: %s (id: %s)", deref(created.GetDisplayName()), deref(created.GetId())))
 		}
@@ -467,8 +466,8 @@ var contactsUpdateCmd = &cobra.Command{
 	Long: `Update fields on an existing Outlook contact.
 
 Examples:
-  cb365 contacts update --id CONTACT_ID --company "New Corp"
-  cb365 contacts update --id CONTACT_ID --job-title "CTO" --phone "+64 21 555 9999"`,
+  cb365 contacts update --id CONTACT_ID --company @company.txt
+  cb365 contacts update --id CONTACT_ID --job-title @job-title.txt --phone @phone.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		idFlag, _ := cmd.Flags().GetString("id")
 		givenName, _ := cmd.Flags().GetString("given-name")
@@ -534,7 +533,7 @@ Examples:
 		format := output.Resolve(flagJSON, flagPlain)
 		switch format {
 		case output.FormatJSON:
-			return output.JSON(formatContactJSON(updated))
+			return output.JSON(formatContactJSON(updated, false))
 		default:
 			output.Success(fmt.Sprintf("Updated contact: %s", deref(updated.GetDisplayName())))
 		}
@@ -581,5 +580,3 @@ func init() {
 	contactsUpdateCmd.Flags().String("department", "", "Department")
 	contactsCmd.AddCommand(contactsUpdateCmd)
 }
-
-

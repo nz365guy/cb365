@@ -79,4 +79,3 @@ var versionCmd = &cobra.Command{
 		cmd.Println("https://github.com/nz365guy/cb365")
 	},
 }
-

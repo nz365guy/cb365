@@ -42,7 +42,11 @@ func localNow() time.Time {
 // parseRFC3339Strict parses a datetime string and rejects bare datetimes without timezone.
 // Safety rule: all datetimes MUST include a timezone offset.
 func parseRFC3339Strict(s string) (time.Time, error) {
-	if !strings.Contains(s, "Z") && !strings.Contains(s, "+") && !strings.ContainsAny(s[len(s)-6:], "+-") {
+	if len(s) < len("2006-01-02T15:04:05Z") {
+		return time.Time{}, fmt.Errorf("invalid RFC3339 datetime %q", s)
+	}
+	tzStart := len(s) - 6
+	if !strings.HasSuffix(s, "Z") && !strings.ContainsAny(s[tzStart:], "+-") {
 		return time.Time{}, fmt.Errorf("datetime %q missing timezone offset — use full RFC3339 format (e.g. 2026-04-10T09:00:00+12:00)", s)
 	}
 	t, err := time.Parse(time.RFC3339, s)
@@ -217,7 +221,9 @@ func formatEventJSON(evt models.Eventable) map[string]interface{} {
 	if evt.GetRecurrence() != nil {
 		item["is_recurring"] = true
 	}
-	item["body_preview"] = deref(evt.GetBodyPreview())
+	if !isPrivateEvent(evt) && evt.GetBodyPreview() != nil {
+		item["body_preview"] = deref(evt.GetBodyPreview())
+	}
 
 	return item
 }
@@ -662,11 +668,12 @@ var calCreateCmd = &cobra.Command{
 // ══════════════════════════════════════════════
 
 var (
-	calUpdateID      string
-	calUpdateSubject string
-	calUpdateStart   string
-	calUpdateEnd     string
-	calUpdateForce   bool
+	calUpdateID       string
+	calUpdateSubject  string
+	calUpdateCategory []string
+	calUpdateStart    string
+	calUpdateEnd      string
+	calUpdateForce    bool
 )
 
 var calUpdateCmd = &cobra.Command{
@@ -680,6 +687,19 @@ var calUpdateCmd = &cobra.Command{
 		format := output.Resolve(flagJSON, flagPlain)
 
 		if flagDryRun {
+			if len(calUpdateCategory) > 0 {
+				categories, err := normaliseCategories(calUpdateCategory)
+				if err != nil {
+					return err
+				}
+				output.Info(fmt.Sprintf("[dry-run] Would update event %s (categories: %s)", calUpdateID, strings.Join(categories, ", ")))
+				if format == output.FormatJSON {
+					return output.JSON(map[string]interface{}{
+						"dry_run": true, "action": "update_event", "id": calUpdateID, "categories": categories,
+					})
+				}
+				return nil
+			}
 			output.Info(fmt.Sprintf("[dry-run] Would update event %s", calUpdateID))
 			if format == output.FormatJSON {
 				return output.JSON(map[string]interface{}{
@@ -769,8 +789,17 @@ var calUpdateCmd = &cobra.Command{
 			hasUpdate = true
 		}
 
+		if len(calUpdateCategory) > 0 {
+			categories, err := normaliseCategories(calUpdateCategory)
+			if err != nil {
+				return err
+			}
+			patch.SetCategories(categories)
+			hasUpdate = true
+		}
+
 		if !hasUpdate {
-			return fmt.Errorf("nothing to update — specify --subject, --start, or --end")
+			return fmt.Errorf("nothing to update — specify --subject, --start, --end, or --category")
 		}
 
 		result, err := calPatchEvent(client, ctx, calUpdateID, patch)
@@ -786,6 +815,24 @@ var calUpdateCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// normaliseCategories validates and de-duplicates --category values while
+// preserving first-seen order (#460: empty values invalid; duplicates folded).
+func normaliseCategories(values []string) ([]string, error) {
+	seen := make(map[string]bool, len(values))
+	categories := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil, fmt.Errorf("--category values must be non-empty")
+		}
+		if !seen[trimmed] {
+			seen[trimmed] = true
+			categories = append(categories, trimmed)
+		}
+	}
+	return categories, nil
 }
 
 // ══════════════════════════════════════════════
@@ -902,6 +949,7 @@ func init() {
 	calUpdateCmd.Flags().StringVar(&calUpdateStart, "start", "", "New start time (RFC3339 with timezone)")
 	calUpdateCmd.Flags().StringVar(&calUpdateEnd, "end", "", "New end time (RFC3339 with timezone)")
 	calUpdateCmd.Flags().BoolVar(&calUpdateForce, "force", false, "Override safety guards (private events, OOF/Busy, large meetings)")
+	calUpdateCmd.Flags().StringArrayVar(&calUpdateCategory, "category", nil, "Replace the event's category list; repeat for multiple categories")
 
 	// calendar delete
 	calDeleteCmd.Flags().StringVar(&calDeleteID, "id", "", "Event ID to delete")
@@ -917,5 +965,3 @@ func init() {
 	calendarCmd.AddCommand(calUpdateCmd)
 	calendarCmd.AddCommand(calDeleteCmd)
 }
-
-

@@ -110,4 +110,3 @@ func TestAuthStatusRefreshPathsReturnError(t *testing.T) {
 			storeCalls, protected)
 	}
 }
-

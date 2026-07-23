@@ -16,26 +16,32 @@ You will receive an acknowledgement within 48 hours and a detailed response with
 ## Security Design Principles
 
 ### Token Storage
-- All authentication tokens are stored in the operating system's native keychain (macOS Keychain, Linux secret-service/libsecret, Windows Credential Manager).
+- Managed delegated bearer material is stored only in a profile-bound Bitwarden Secrets Manager EU record.
+- App-only credentials use the operating system keychain, with a profile-bound AES-256-GCM encrypted-file fallback for headless systems.
 - Tokens are **never** stored in plaintext files.
 - Tokens are **never** logged, even at verbose/debug log levels.
 
 ### Authentication
 - cb365 uses Microsoft's official `azidentity` library for all Entra ID authentication flows.
-- No custom cryptographic implementations.
+- The encrypted-file fallback uses Go's AES-GCM implementation and binds each ciphertext to its profile name.
 - OAuth 2.0 device code flow for delegated authentication.
 - Client credentials flow for unattended/service authentication.
+
+### Private Input
+- String flags support `@path` and `@-` indirect input so business content does not need to appear in process arguments.
+- Use indirect input for subjects, message bodies, names, addresses, queries, tenant paths, and list values.
+- Treat indirect input files as sensitive, restrict their permissions, and remove them according to local policy.
+- Authentication secrets use the dedicated stdin/certificate flow and must never be placed in a general content flag.
 
 ### Least Privilege
 - Each workload module requests only the Graph API scopes it needs.
 - The `--dry-run` flag allows previewing write operations without executing them.
-- Write operations in non-interactive mode require explicit `--force` flag.
+- Destructive writes require `--force`; external communications require `--confirm`; all writes support `--dry-run` where documented.
 
 ### Supply Chain
-- Minimal dependency tree — Go standard library + Microsoft official SDKs.
-- `govulncheck` runs in CI on every commit.
-- Software Bill of Materials (SBOM) attached to every release.
-- All release binaries are signed.
+- Dependencies are locked through `go.mod`/`go.sum` and reviewed by CI.
+- `gosec`, `govulncheck`, and secret scanning run in CI.
+- Release workflows generate an SBOM and sign release artifacts when a release is published successfully.
 
 ## Supported Versions
 
