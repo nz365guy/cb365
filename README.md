@@ -352,12 +352,14 @@ Loop workspaces are SharePoint Embedded containers. Page access uses app-only au
 |---------|-------------|
 | `cb365 loop workspaces list` | List known workspaces from local config |
 | `cb365 loop pages list --workspace "Name"` | List pages in a workspace |
-| `cb365 loop pages get --workspace "Name" --item-id ID --output ./page` | Download a page |
-| `cb365 loop pages delete --workspace "Name" --item-id ID` | Move page to recycle bin |
+| `cb365 loop pages get --workspace "Name" --page ID --output ./page.loop` | Download the original page |
+| `cb365 loop pages get --workspace "Name" --page ID --format html --output ./page.html` | Export a page as readable HTML |
+| `cb365 loop pages delete --workspace "Name" --page ID` | Move page to recycle bin |
 | `cb365 loop pages upload --workspace @workspace.txt --file @local-path.txt --path @remote-path.txt` | Upload a file |
 | `cb365 loop pages mkdir --workspace @workspace.txt --path @remote-path.txt` | Create a folder |
 
 > **Note:** Loop commands use app-only auth (`work-app` profile) by default. Loop requires SharePoint Embedded (SPE) setup — see [Loop Setup](#loop-setup) below.
+> `--format original` is the default. HTML output is an untrusted export for reading or archiving; cb365 does not render it or provide rich-content editing.
 
 ---
 

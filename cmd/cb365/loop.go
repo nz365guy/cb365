@@ -48,6 +48,28 @@ type loopConfig struct {
 	Workspaces []loopWorkspace `json:"workspaces"`
 }
 
+const (
+	loopPageFormatOriginal = "original"
+	loopPageFormatHTML     = "html"
+)
+
+func loopPageContentRequestConfiguration(rawFormat string) (*drivesPkg.ItemItemsItemContentRequestBuilderGetRequestConfiguration, string, error) {
+	selectedFormat := strings.ToLower(strings.TrimSpace(rawFormat))
+	switch selectedFormat {
+	case loopPageFormatOriginal:
+		return nil, selectedFormat, nil
+	case loopPageFormatHTML:
+		requestFormat := selectedFormat
+		return &drivesPkg.ItemItemsItemContentRequestBuilderGetRequestConfiguration{
+			QueryParameters: &drivesPkg.ItemItemsItemContentRequestBuilderGetQueryParameters{
+				Format: &requestFormat,
+			},
+		}, selectedFormat, nil
+	default:
+		return nil, "", fmt.Errorf("unsupported --format %q (supported values: original, html)", rawFormat)
+	}
+}
+
 // loopConfigPath returns the path to the Loop workspaces config file.
 func loopConfigPath() string {
 	home, _ := os.UserHomeDir()
@@ -305,18 +327,25 @@ var loopPagesGetCmd = &cobra.Command{
 
 Examples:
   cb365 loop pages get --workspace @workspace.txt --page ITEM_ID --output @local-path.txt
+  cb365 loop pages get --workspace @workspace.txt --page ITEM_ID --format html --output /tmp/page.html
   cb365 loop pages get --workspace @workspace.txt --page ITEM_ID     # prints to stdout`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		wsFlag, _ := cmd.Flags().GetString("workspace")
 		pageFlag, _ := cmd.Flags().GetString("page")
 		outputFlag, _ := cmd.Flags().GetString("output")
 		forceFlag, _ := cmd.Flags().GetBool("force")
+		formatFlag, _ := cmd.Flags().GetString("format")
 
 		if wsFlag == "" {
 			return fmt.Errorf("--workspace is required")
 		}
 		if pageFlag == "" {
 			return fmt.Errorf("--page is required (item ID from 'cb365 loop pages list')")
+		}
+
+		requestConfig, pageFormat, err := loopPageContentRequestConfiguration(formatFlag)
+		if err != nil {
+			return err
 		}
 
 		ensureLoopProfile()
@@ -344,11 +373,11 @@ Examples:
 			if target == "" {
 				target = "stdout"
 			}
-			output.Info(fmt.Sprintf("[DRY RUN] Would download page %s from %q → %s", pageFlag, ws.Name, target))
+			output.Info(fmt.Sprintf("[DRY RUN] Would download page %s from %q as %s → %s", pageFlag, ws.Name, pageFormat, target))
 			return nil
 		}
 
-		content, err := client.Drives().ByDriveId(ws.ID).Items().ByDriveItemId(pageFlag).Content().Get(ctx, nil)
+		content, err := client.Drives().ByDriveId(ws.ID).Items().ByDriveItemId(pageFlag).Content().Get(ctx, requestConfig)
 		if err != nil {
 			return fmt.Errorf("downloading page: %w", err)
 		}
@@ -383,6 +412,7 @@ Examples:
 					"path":      outputFlag,
 					"size":      len(content),
 					"workspace": ws.Name,
+					"format":    pageFormat,
 				})
 			default:
 				output.Success(fmt.Sprintf("Downloaded page → %s (%s)", outputFlag, humanFileSize(int64(len(content)))))
@@ -703,6 +733,7 @@ func init() {
 	loopPagesGetCmd.Flags().String("page", "", "Page item ID (required)")
 	loopPagesGetCmd.Flags().String("output", "", "Output file path (omit for stdout)")
 	loopPagesGetCmd.Flags().Bool("force", false, "Overwrite an existing output file")
+	loopPagesGetCmd.Flags().String("format", loopPageFormatOriginal, "Download format (original or html)")
 	loopPagesCmd.AddCommand(loopPagesGetCmd)
 
 	// loop pages delete

@@ -284,8 +284,11 @@ cb365 loop workspaces list --json
 # List pages in a workspace (name or container ID)
 cb365 loop pages list --workspace @workspace.txt --json
 
-# Download a page
-cb365 loop pages get --workspace @workspace.txt --item-id ITEM_ID --output @local-path.txt
+# Download the original page
+cb365 loop pages get --workspace @workspace.txt --page ITEM_ID --output @local-path.txt
+
+# Export a page as readable HTML
+cb365 loop pages get --workspace @workspace.txt --page ITEM_ID --format html --output /tmp/loop-page.html
 
 # Upload a file
 cb365 loop pages upload --workspace @workspace.txt --file @local-path.txt --path @remote-path.txt
@@ -294,10 +297,10 @@ cb365 loop pages upload --workspace @workspace.txt --file @local-path.txt --path
 cb365 loop pages mkdir --workspace @workspace.txt --path @remote-path.txt
 
 # Delete (recycle bin)
-cb365 loop pages delete --workspace @workspace.txt --item-id ITEM_ID --force
+cb365 loop pages delete --workspace @workspace.txt --page ITEM_ID --force
 ```
 
-**Note:** Loop commands automatically use the app-only profile. Loop requires SharePoint Embedded (SPE) setup — see the README for prerequisites.
+**Note:** Loop commands automatically use the app-only profile. Loop requires SharePoint Embedded (SPE) setup — see the README for prerequisites. `--format original` is the default. Treat HTML as an untrusted export, keep it in `/tmp/` unless a permanent location is approved, and do not use this command for rich-content editing.
 
 ---
 
