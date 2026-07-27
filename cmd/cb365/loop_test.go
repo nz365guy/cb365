@@ -37,6 +37,68 @@ func TestLoopPagesGetRequiresWorkspaceAndPage(t *testing.T) {
 	if cmd.Flags().Lookup("output") == nil {
 		t.Fatal("loop pages get missing --output flag")
 	}
+	formatFlag := cmd.Flags().Lookup("format")
+	if formatFlag == nil {
+		t.Fatal("loop pages get missing --format flag")
+	}
+	if formatFlag.DefValue != loopPageFormatOriginal {
+		t.Errorf("--format default should be %q", loopPageFormatOriginal)
+	}
+}
+
+func TestLoopPageContentRequestConfiguration(t *testing.T) {
+	t.Run("original leaves conversion query unset", func(t *testing.T) {
+		config, selectedFormat, err := loopPageContentRequestConfiguration(loopPageFormatOriginal)
+		if err != nil {
+			t.Fatalf("original format returned error: %v", err)
+		}
+		if config != nil {
+			t.Fatal("original format should not set request configuration")
+		}
+		if selectedFormat != loopPageFormatOriginal {
+			t.Errorf("selected format = %q, want %q", selectedFormat, loopPageFormatOriginal)
+		}
+	})
+
+	t.Run("html sets exact conversion query", func(t *testing.T) {
+		config, selectedFormat, err := loopPageContentRequestConfiguration(loopPageFormatHTML)
+		if err != nil {
+			t.Fatalf("html format returned error: %v", err)
+		}
+		if config == nil || config.QueryParameters == nil || config.QueryParameters.Format == nil {
+			t.Fatal("html format should set the conversion query")
+		}
+		if got := *config.QueryParameters.Format; got != loopPageFormatHTML {
+			t.Errorf("conversion query format = %q, want %q", got, loopPageFormatHTML)
+		}
+		if selectedFormat != loopPageFormatHTML {
+			t.Errorf("selected format = %q, want %q", selectedFormat, loopPageFormatHTML)
+		}
+	})
+
+	t.Run("format is case normalised", func(t *testing.T) {
+		config, selectedFormat, err := loopPageContentRequestConfiguration(" HTML ")
+		if err != nil {
+			t.Fatalf("normalised HTML format returned error: %v", err)
+		}
+		if config == nil || selectedFormat != loopPageFormatHTML {
+			t.Fatalf("normalised format = %q with config %v", selectedFormat, config)
+		}
+	})
+
+	t.Run("unsupported format is rejected", func(t *testing.T) {
+		config, selectedFormat, err := loopPageContentRequestConfiguration("pdf")
+		if err == nil {
+			t.Fatal("unsupported format should return an error")
+		}
+		if config != nil || selectedFormat != "" {
+			t.Fatalf("unsupported format returned config %v and format %q", config, selectedFormat)
+		}
+		want := `unsupported --format "pdf" (supported values: original, html)`
+		if err.Error() != want {
+			t.Errorf("error = %q, want %q", err, want)
+		}
+	})
 }
 
 func TestResolveWorkspaceID(t *testing.T) {
