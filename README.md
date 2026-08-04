@@ -151,6 +151,19 @@ cb365 auth migrate \
 
 Migration verifies legacy ownership and modes before reading, proves the BWS write by readback, then removes and verifies every legacy layer. Workload commands remain disabled while cleanup is incomplete; rerun the same command to resume cleanup.
 
+To rebind an encrypted-file app-only store created before profile-bound
+ciphertext was introduced, select any affected app-only profile:
+
+```bash
+cb365 auth migrate --profile work-cert
+```
+
+Because the legacy file has one global format version, this operation validates
+and migrates every app-only entry atomically. Each entry's token claims must
+match its configured tenant and client, and it must contain exactly one usable
+refresh credential. Ambiguous, orphaned, incomplete, or unknown-version
+entries fail closed and require reauthentication.
+
 ### App-Only (Client Secret)
 
 For unattended automation. The app authenticates with a client secret. Requires application permissions (not delegated) in Entra.

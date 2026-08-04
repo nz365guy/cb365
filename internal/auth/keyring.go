@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/nz365guy/cb365/internal/config"
 	"github.com/zalando/go-keyring"
 )
 
@@ -160,4 +161,20 @@ func DeleteToken(profileName string) error {
 		return fmt.Errorf("initializing token store: %w", err)
 	}
 	return store.Delete(profileName)
+}
+
+// MigrateLegacyAppOnlyTokens atomically rebinds every entry in the legacy
+// encrypted-file store to its configured profile name. The selected profile
+// must be one of those entries. Legacy stores use one global format version,
+// so migrating only one entry would make every other entry unreadable.
+func MigrateLegacyAppOnlyTokens(profiles map[string]*config.Profile, selectedProfile string) (int, error) {
+	store, err := getStore()
+	if err != nil {
+		return 0, fmt.Errorf("initializing token store: %w", err)
+	}
+	fileStore, ok := store.(*fileBackend)
+	if !ok {
+		return 0, fmt.Errorf("legacy app-only migration applies only to the encrypted-file token store")
+	}
+	return fileStore.migrateLegacyAppOnlyTokens(profiles, selectedProfile)
 }
