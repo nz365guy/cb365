@@ -11,9 +11,10 @@ require (
 	github.com/microsoft/kiota-abstractions-go v1.9.4
 	github.com/microsoft/kiota-authentication-azure-go v1.3.1
 	github.com/microsoft/kiota-http-go v1.5.6
-	github.com/microsoftgraph/msgraph-sdk-go v1.100.0
+	github.com/microsoftgraph/msgraph-sdk-go v1.101.0
 	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.1
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
@@ -37,7 +38,6 @@ require (
 	github.com/microsoft/kiota-serialization-multipart-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-text-go v1.1.3 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/std-uritemplate/std-uritemplate/go/v2 v2.0.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
