@@ -6,7 +6,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache v0.4.0
-	github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0
 	github.com/bitwarden/sdk-go/v2 v2.1.0
 	github.com/microsoft/kiota-abstractions-go v1.9.4
 	github.com/microsoft/kiota-authentication-azure-go v1.3.1
@@ -44,5 +44,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 )
