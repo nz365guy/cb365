@@ -273,7 +273,10 @@ secrets use the dedicated stdin/certificate flow described above.
 | Command | Description |
 |---------|-------------|
 | `cb365 mail list` | List inbox messages |
+| `cb365 mail list-folder --folder FOLDER` | List messages in a specific folder, including last-modified time |
 | `cb365 mail get --id ID` | Get a single message |
+| `cb365 mail move --id ID --destination FOLDER --confirm` | Move one message to another folder |
+| `cb365 mail permanent-delete --id ID --confirm` | Permanently delete one message after an explicit confirmation gate |
 | `cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Send a message |
 | `cb365 mail search --query @query.txt` | Search messages |
 
