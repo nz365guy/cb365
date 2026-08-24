@@ -41,7 +41,7 @@ var mailListFolderCmd = &cobra.Command{
 			QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
 				Top:     &mailListFolderMax,
 				Orderby: []string{"receivedDateTime desc"},
-				Select:  []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview"},
+				Select:  []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "lastModifiedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview"},
 			},
 		}
 		if mailListFolderFilter != "" {
