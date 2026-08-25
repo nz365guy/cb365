@@ -10,9 +10,36 @@ import (
 func preserveMailListFolderGlobals(t *testing.T) {
 	t.Helper()
 	oldFolder, oldMax := mailListFolderID, mailListFolderMax
+	oldFilter, oldOrder := mailListFolderFilter, mailListFolderOrder
 	t.Cleanup(func() {
 		mailListFolderID, mailListFolderMax = oldFolder, oldMax
+		mailListFolderFilter, mailListFolderOrder = oldFilter, oldOrder
 	})
+}
+
+func TestMailListFolderQuerySupportsMatchingFilterAndOrder(t *testing.T) {
+	preserveMailListFolderGlobals(t)
+	mailListFolderMax = 1000
+	mailListFolderFilter = "lastModifiedDateTime lt 2026-08-18T00:00:00Z"
+	mailListFolderOrder = "lastModifiedDateTime asc"
+
+	parameters := newMailListFolderQueryParameters()
+	if parameters.Filter == nil || *parameters.Filter != mailListFolderFilter {
+		t.Fatalf("expected last-modified filter, got %v", parameters.Filter)
+	}
+	if len(parameters.Orderby) != 1 || parameters.Orderby[0] != mailListFolderOrder {
+		t.Fatalf("expected matching last-modified order, got %v", parameters.Orderby)
+	}
+}
+
+func TestMailListFolderQueryCanDisableOrdering(t *testing.T) {
+	preserveMailListFolderGlobals(t)
+	mailListFolderOrder = " "
+
+	parameters := newMailListFolderQueryParameters()
+	if len(parameters.Orderby) != 0 {
+		t.Fatalf("expected no ordering, got %v", parameters.Orderby)
+	}
 }
 
 func TestMailListFolderRequiresFolderBeforeAuthentication(t *testing.T) {
