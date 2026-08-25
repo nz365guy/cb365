@@ -275,6 +275,7 @@ secrets use the dedicated stdin/certificate flow described above.
 | `cb365 mail list` | List inbox messages |
 | `cb365 mail list-folder --folder FOLDER [--filter FILTER] [--order-by ORDER]` | List messages in a specific folder, including last-modified time; align filter/order fields for Graph efficient filters |
 | `cb365 mail get --id ID` | Get a single message |
+| `cb365 mail mark-read --id ID --confirm` | Mark one message as read after an explicit confirmation gate |
 | `cb365 mail move --id ID --destination FOLDER --confirm` | Move one message to another folder |
 | `cb365 mail permanent-delete --id ID --confirm` | Permanently delete one message after an explicit confirmation gate |
 | `cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Send a message |
