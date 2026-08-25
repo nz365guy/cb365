@@ -33,6 +33,8 @@ jobs:
         with:
           distribution: goreleaser
           version: "v2.17.0"
-          args: release --clean
+          # The managed provider is memory-heavy; serialize platform builds so a
+          # hosted runner cannot be OOM-killed by six concurrent Go compilers.
+          args: release --clean --parallelism 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
