@@ -6,7 +6,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity/cache v0.4.0
-	github.com/AzureAD/microsoft-authentication-library-for-go v1.8.0
+	github.com/AzureAD/microsoft-authentication-library-for-go v1.9.0
 	github.com/bitwarden/sdk-go/v2 v2.1.0
 	github.com/microsoft/kiota-abstractions-go v1.10.0
 	github.com/microsoft/kiota-authentication-azure-go v1.3.1
