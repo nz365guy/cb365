@@ -278,6 +278,8 @@ secrets use the dedicated stdin/certificate flow described above.
 | `cb365 mail mark-read --id ID --confirm` | Mark one message as read after an explicit confirmation gate |
 | `cb365 mail move --id ID --destination FOLDER --confirm` | Move one message to another folder |
 | `cb365 mail permanent-delete --id ID --confirm` | Permanently delete one message after an explicit confirmation gate |
+| `cb365 mail draft --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Save a new draft in Drafts (never sends) |
+| `cb365 mail draft --reply-to-id ID --body @body.txt [--reply-all] --confirm` | Save a reply draft in the original thread (never sends) |
 | `cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Send a message |
 | `cb365 mail search --query @query.txt` | Search messages |
 
