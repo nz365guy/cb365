@@ -32,6 +32,9 @@ Supports Microsoft To Do, Planner, Mail, Calendar, Contacts,
 Teams, Loop, SharePoint, and OneDrive via the Microsoft Graph API.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return expandIndirectStringFlags(cmd)
+	},
 }
 
 func init() {

@@ -10,7 +10,15 @@ updates:
       prefix: "deps"
     labels:
       - dependencies
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
@@ -22,4 +30,11 @@ updates:
     labels:
       - ci
     open-pull-requests-limit: 5
-
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

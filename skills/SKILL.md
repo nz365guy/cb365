@@ -91,6 +91,10 @@ cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --c
 
 # Preview before sending
 cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --dry-run
+
+# Draft instead of send: a person reviews and sends from their mail client
+cb365 mail draft --reply-to-id MESSAGE_ID --body @body.txt --confirm --json
+cb365 mail draft --to @recipients.txt --subject @subject.txt --body @body.txt --confirm --json
 ```
 
 **Safety:** All outbound mail includes `[Sent via cb365]` audit footer. Sending to >10 recipients requires `--force`.

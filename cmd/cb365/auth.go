@@ -537,7 +537,7 @@ var (
 
 var authMigrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migrate one legacy delegated profile to BWS EU",
+	Short: "Migrate legacy credentials to profile-bound storage",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -553,6 +553,17 @@ var authMigrateCmd = &cobra.Command{
 		profile, ok := cfg.Profiles[profileName]
 		if !ok {
 			return fmt.Errorf("profile %q not found", profileName)
+		}
+		if profile.AuthMode == config.AuthModeAppOnly {
+			if migrateBWSOrg != "" || migrateBWSProject != "" {
+				return fmt.Errorf("BWS migration flags do not apply to app-only profiles")
+			}
+			count, migrateErr := auth.MigrateLegacyAppOnlyTokens(cfg.Profiles, profileName)
+			if migrateErr != nil {
+				return migrateErr
+			}
+			output.Success(fmt.Sprintf("Migrated %d app-only credential entries to profile-bound storage", count))
+			return nil
 		}
 		if profile.AuthMode != config.AuthModeDelegated {
 			return fmt.Errorf("profile %q is app-only; delegated migration does not apply", profileName)

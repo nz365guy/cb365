@@ -151,6 +151,19 @@ cb365 auth migrate \
 
 Migration verifies legacy ownership and modes before reading, proves the BWS write by readback, then removes and verifies every legacy layer. Workload commands remain disabled while cleanup is incomplete; rerun the same command to resume cleanup.
 
+To rebind an encrypted-file app-only store created before profile-bound
+ciphertext was introduced, select any affected app-only profile:
+
+```bash
+cb365 auth migrate --profile work-cert
+```
+
+Because the legacy file has one global format version, this operation validates
+and migrates every app-only entry atomically. Each entry's token claims must
+match its configured tenant and client, and it must contain exactly one usable
+refresh credential. Ambiguous, orphaned, incomplete, or unknown-version
+entries fail closed and require reauthentication.
+
 ### App-Only (Client Secret)
 
 For unattended automation. The app authenticates with a client secret. Requires application permissions (not delegated) in Entra.
@@ -260,7 +273,13 @@ secrets use the dedicated stdin/certificate flow described above.
 | Command | Description |
 |---------|-------------|
 | `cb365 mail list` | List inbox messages |
+| `cb365 mail list-folder --folder FOLDER [--filter FILTER] [--order-by ORDER]` | List messages in a specific folder, including last-modified time; align filter/order fields for Graph efficient filters |
 | `cb365 mail get --id ID` | Get a single message |
+| `cb365 mail mark-read --id ID --confirm` | Mark one message as read after an explicit confirmation gate |
+| `cb365 mail move --id ID --destination FOLDER --confirm` | Move one message to another folder |
+| `cb365 mail permanent-delete --id ID --confirm` | Permanently delete one message after an explicit confirmation gate |
+| `cb365 mail draft --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Save a new draft in Drafts (never sends) |
+| `cb365 mail draft --reply-to-id ID --body @body.txt [--reply-all] --confirm` | Save a reply draft in the original thread (never sends) |
 | `cb365 mail send --to @recipients.txt --subject @subject.txt --body @body.txt --confirm` | Send a message |
 | `cb365 mail search --query @query.txt` | Search messages |
 
