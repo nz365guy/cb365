@@ -140,6 +140,20 @@ func formatMessageJSON(msg models.Messageable) map[string]interface{} {
 		item["importance"] = msg.GetImportance().String()
 	}
 	item["body_preview"] = deref(msg.GetBodyPreview())
+	authenticationHeaders := map[string]string{}
+	for _, header := range msg.GetInternetMessageHeaders() {
+		if header == nil || header.GetName() == nil || header.GetValue() == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(deref(header.GetName())))
+		switch name {
+		case "authentication-results", "arc-authentication-results", "received-spf":
+			authenticationHeaders[name] = deref(header.GetValue())
+		}
+	}
+	if len(authenticationHeaders) > 0 {
+		item["authentication_headers"] = authenticationHeaders
+	}
 
 	return item
 }
