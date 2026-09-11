@@ -46,7 +46,7 @@ func defaultMailDeltaStatePath() string {
 
 func loadMailDeltaState(path string) (mailDeltaState, error) {
 	state := mailDeltaState{Version: 1, Folders: map[string]mailDeltaFolderState{}}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- the operator explicitly supplies the delta state path; writes are atomic and 0600.
 	if os.IsNotExist(err) {
 		return state, nil
 	}
@@ -77,11 +77,15 @@ func saveMailDeltaState(path string, state mailDeltaState) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("protect delta state: %w (close: %v)", err, closeErr)
+		}
 		return fmt.Errorf("protect delta state: %w", err)
 	}
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
+		if closeErr := tmp.Close(); closeErr != nil {
+			return fmt.Errorf("write delta state: %w (close: %v)", err, closeErr)
+		}
 		return fmt.Errorf("write delta state: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
