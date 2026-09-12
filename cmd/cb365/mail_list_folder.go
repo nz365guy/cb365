@@ -21,7 +21,7 @@ var (
 func newMailListFolderQueryParameters() *users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters {
 	parameters := &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
 		Top:    &mailListFolderMax,
-		Select: []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "lastModifiedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview", "internetMessageHeaders"},
+		Select: []string{"id", "subject", "from", "toRecipients", "receivedDateTime", "lastModifiedDateTime", "isRead", "hasAttachments", "importance", "bodyPreview", "internetMessageHeaders", "internetMessageId"},
 	}
 	if order := strings.TrimSpace(mailListFolderOrder); order != "" {
 		parameters.Orderby = []string{order}
