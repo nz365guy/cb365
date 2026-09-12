@@ -13,10 +13,14 @@ import (
 )
 
 var mailTranslateID, mailTranslateSource, mailTranslateTarget string
-var exchangeIdentifier = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{1,2048}$`)
+var exchangeIdentifier = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]+$`)
+
+func validExchangeIdentifier(identifier string) bool {
+	return len(identifier) > 0 && len(identifier) <= 2048 && exchangeIdentifier.MatchString(identifier)
+}
 
 func newTranslateIDRequest(identifier, source, target string) (*users.ItemTranslateExchangeIdsPostRequestBody, error) {
-	if !exchangeIdentifier.MatchString(identifier) {
+	if !validExchangeIdentifier(identifier) {
 		return nil, fmt.Errorf("--id must be one valid Exchange identifier")
 	}
 	sourceValue, _ := models.ParseExchangeIdFormat(source)
@@ -35,7 +39,7 @@ func newTranslateIDRequest(identifier, source, target string) (*users.ItemTransl
 }
 
 func translatedMessageID(identifier string, values []models.ConvertIdResultable) (string, error) {
-	if len(values) != 1 || values[0] == nil || deref(values[0].GetSourceId()) != identifier || !exchangeIdentifier.MatchString(deref(values[0].GetTargetId())) {
+	if len(values) != 1 || values[0] == nil || deref(values[0].GetSourceId()) != identifier || !validExchangeIdentifier(deref(values[0].GetTargetId())) {
 		return "", fmt.Errorf("identifier translation was not confirmed")
 	}
 	return deref(values[0].GetTargetId()), nil

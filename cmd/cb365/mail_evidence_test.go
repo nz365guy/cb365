@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,14 @@ func TestTranslateIDRequestAndResultAreExactlyBound(t *testing.T) {
 	}
 	if _, err := translatedMessageID("different-source", []models.ConvertIdResultable{value}); err == nil {
 		t.Fatal("wrong source accepted")
+	}
+}
+
+func TestExchangeIdentifierLengthBoundary(t *testing.T) {
+	if !validExchangeIdentifier(strings.Repeat("a", 2048)) {
+		t.Fatal("maximum identifier refused")
+	}
+	if validExchangeIdentifier(strings.Repeat("a", 2049)) || validExchangeIdentifier("") {
+		t.Fatal("invalid identifier length accepted")
 	}
 }
