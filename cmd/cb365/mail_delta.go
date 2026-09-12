@@ -120,7 +120,7 @@ func mailDeltaQueryParameters() *users.ItemMailFoldersItemMessagesDeltaRequestBu
 		Select: []string{
 			"id", "subject", "from", "toRecipients", "receivedDateTime",
 			"lastModifiedDateTime", "isRead", "hasAttachments", "importance",
-			"bodyPreview", "internetMessageHeaders",
+			"bodyPreview", "internetMessageHeaders", "internetMessageId",
 		},
 	}
 }
