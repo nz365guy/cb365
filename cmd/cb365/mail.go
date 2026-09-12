@@ -291,9 +291,9 @@ var mailListCmd = &cobra.Command{
 var mailGetID string
 var mailGetImmutableID bool
 
-func newMailGetRequestConfiguration(immutable bool) *users.ItemMessagesItemRequestBuilderGetRequestConfiguration {
-	config := &users.ItemMessagesItemRequestBuilderGetRequestConfiguration{
-		QueryParameters: &users.ItemMessagesItemRequestBuilderGetQueryParameters{
+func newMailGetRequestConfiguration(immutable bool) *users.ItemMessagesMessageItemRequestBuilderGetRequestConfiguration {
+	config := &users.ItemMessagesMessageItemRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMessagesMessageItemRequestBuilderGetQueryParameters{
 			Select: []string{"id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
 				"receivedDateTime", "sentDateTime", "lastModifiedDateTime", "isRead", "hasAttachments",
 				"importance", "bodyPreview", "body", "conversationId", "webLink",
