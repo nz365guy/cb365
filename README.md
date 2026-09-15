@@ -552,7 +552,7 @@ Loop workspaces use SharePoint Embedded (SPE), which requires additional setup b
 
 ### Workspace Discovery
 
-Loop workspace IDs are not discoverable via Graph API. You need to populate a local config file:
+Loop workspace IDs cannot be looked up via Graph API. You need to populate a local config file:
 
 ```bash
 # Location: ~/.config/cb365/loop-workspaces.json
