@@ -1,0 +1,100 @@
+# Auto-tag on main
+#
+# Failure this prevents: on 2026-09-13 four commits landed on main and no
+# release was cut. Merging to main does not publish in this repo - only a `v*`
+# tag triggers Release (goreleaser) - so the deploy pipeline had no new
+# artefact to install and the VM silently ran a stale binary for nine days.
+# This workflow cuts the next patch tag automatically on every push to main, so
+# main is never ahead of the latest published release.
+#
+# A human cutting a minor or major tag (say v0.5.0) simply becomes the new
+# baseline for the next patch bump. Manual tags are never overwritten.
+#
+# Note: `branches: [main]` matches branch refs only, so a tag push never
+# re-enters this workflow.
+#
+# Operator note: a tag created with the repository GITHUB_TOKEN does not itself
+# start another workflow run - GitHub suppresses events raised by GITHUB_TOKEN.
+# If the deploy pipeline depends on Release firing from the tag event, swap the
+# token on the tag-creation step for a GitHub App or PAT with contents: write.
+
+name: Auto-tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Serialize runs: a second merge waits behind the first instead of racing it.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Cut the next patch tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          head_sha="$(git rev-parse HEAD)"
+
+          # Highest existing strict-semver tag, ordered by semver (not by date).
+          latest="$(git tag --list 'v*' --sort=-v:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+
+          if [ -z "$latest" ]; then
+            echo "No v<major>.<minor>.<patch> tag exists yet; nothing to bump from."
+            exit 0
+          fi
+
+          # Top of main is already the released commit: nothing to do.
+          if [ "$(git rev-list -n1 "$latest")" = "$head_sha" ]; then
+            echo "HEAD $head_sha is already tagged $latest; no tag needed."
+            exit 0
+          fi
+
+          # Only ever bump forward from a tag that is on this history.
+          if ! git merge-base --is-ancestor "$latest" "$head_sha"; then
+            echo "Newest tag $latest is not an ancestor of $head_sha; refusing to bump."
+            exit 1
+          fi
+
+          version="${latest#v}"
+          IFS=. read -r major minor patch <<<"$version"
+          next="v${major}.${minor}.$((patch + 1))"
+
+          # Never recreate a tag that already exists.
+          if git rev-parse -q --verify "refs/tags/$next" >/dev/null; then
+            echo "Tag $next already exists; refusing to recreate it." >&2
+            exit 1
+          fi
+
+          echo "Cutting $next on $head_sha (previous release $latest)"
+
+          response="$(mktemp)"
+          status="$(curl -sS -o "$response" -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "{\"ref\":\"refs/tags/${next}\",\"sha\":\"${head_sha}\"}")"
+
+          # Fail loudly: a swallowed error here recreates the 2026-09-13 outage.
+          if [ "$status" != "201" ]; then
+            echo "Failed to create tag $next on $head_sha (HTTP $status):" >&2
+            cat "$response" >&2
+            exit 1
+          fi
+
+          echo "Tag $next created on $head_sha."
