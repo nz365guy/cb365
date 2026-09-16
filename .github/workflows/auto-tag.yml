@@ -120,7 +120,7 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            -d "{\"ref\":\"${tag}\"}")'
+            -d "{\"ref\":\"${tag}\"}")"
 
           if [ "$status" != "204" ]; then
             echo "Failed to dispatch Release for $tag (HTTP $status):" >&2
