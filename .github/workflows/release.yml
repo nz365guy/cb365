@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  # A dispatch trigger exists so Auto-tag can start this build explicitly.
+  # GitHub suppresses workflow runs raised by the repository GITHUB_TOKEN, so a
+  # tag created with that token never starts this workflow on its own; a
+  # workflow_dispatch event is the documented exception and always creates a run.
+  workflow_dispatch:
 
 permissions:
   contents: write
