@@ -13,10 +13,11 @@
 # Note: `branches: [main]` matches branch refs only, so a tag push never
 # re-enters this workflow.
 #
-# Operator note: a tag created with the repository GITHUB_TOKEN does not itself
-# start another workflow run - GitHub suppresses events raised by GITHUB_TOKEN.
-# If the deploy pipeline depends on Release firing from the tag event, swap the
-# token on the tag-creation step for a GitHub App or PAT with contents: write.
+# GitHub suppresses workflow runs raised by the repository GITHUB_TOKEN, so the
+# tag cut here does not start Release by itself. The tag step therefore dispatches
+# Release on the new tag (workflow_dispatch is the documented exception that
+# always creates a run). Without that step a tag could exist with no artefact ever
+# built from it, which is the 2026-09-13 gap silently restored.
 
 name: Auto-tag
 
@@ -26,6 +27,7 @@ on:
 
 permissions:
   contents: write
+  actions: write  # Required to dispatch Release on the tag this run creates
 
 # Serialize runs: a second merge waits behind the first instead of racing it.
 concurrency:
@@ -42,6 +44,7 @@ jobs:
           fetch-depth: 0
 
       - name: Cut the next patch tag
+        id: cut
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -98,3 +101,31 @@ jobs:
           fi
 
           echo "Tag $next created on $head_sha."
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      # The tag is not enough on its own: a GITHUB_TOKEN-created tag cannot
+      # trigger Release, so the build is started explicitly here. Fail loudly -
+      # a tag with no build behind it recreates the 2026-09-13 outage.
+      - name: Start the Release build for the new tag
+        if: steps.cut.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.cut.outputs.tag }}"
+          echo "Dispatching Release for $tag"
+          response="$(mktemp)"
+          status="$(curl -sS -o "$response" -w '%{http_code}' \
+            -X POST "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "{\"ref\":\"${tag}\"}")"
+
+          if [ "$status" != "204" ]; then
+            echo "Failed to dispatch Release for $tag (HTTP $status):" >&2
+            cat "$response" >&2
+            exit 1
+          fi
+
+          echo "Release dispatched for $tag."
