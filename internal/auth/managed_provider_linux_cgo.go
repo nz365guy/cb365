@@ -101,10 +101,13 @@ func ResumeManagedDelegatedMigration(_ context.Context, profile *config.Profile)
 		return err
 	}
 	defer lock.Close()
-	// Best-effort: this is cleaning up whatever legacy artifacts might
-	// predate this profile's migration to the managed cache, not the
-	// managed credential itself -- see cleanupLegacyDelegated's doc comment.
-	return cleanupLegacyDelegated(profile.Name, true)
+	// Strict, not best-effort: this is migration completing, not a logout of
+	// an already-fully-managed profile. The caller (auth migrate) treats a
+	// nil return here as proof the legacy credential is gone and immediately
+	// persists MigrationState = complete -- tolerating an inconclusive
+	// keyring result here would let migration finish without ever having
+	// verified the legacy secret was actually removed.
+	return cleanupLegacyDelegated(profile.Name, false)
 }
 
 func NewManagedDelegatedCredential(profile *config.Profile, ipv4Only bool) (azcore.TokenCredential, error) {

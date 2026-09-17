@@ -2,7 +2,10 @@
 
 package auth
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestIsAmbiguousLegacyKeyringFailure(t *testing.T) {
 	cases := []struct {
@@ -11,12 +14,17 @@ func TestIsAmbiguousLegacyKeyringFailure(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "ManagedCacheUnavailable is ambiguous (inconclusive keyring result)",
-			err:  managedError(ManagedCacheUnavailable, "locate legacy Azure Identity cache key", nil),
+			name: "an inconclusive-marked ManagedCacheUnavailable is ambiguous",
+			err:  inconclusiveLegacyKeyringError(ManagedCacheUnavailable, "locate legacy Azure Identity cache key", nil),
 			want: true,
 		},
 		{
-			name: "ManagedCacheConflict is a confirmed leftover key, not ambiguous",
+			name: "a plain (unmarked) ManagedCacheUnavailable is NOT ambiguous -- e.g. a key that was found but could not be deleted is a confirmed problem, not a search ambiguity, even though it shares the same class",
+			err:  managedError(ManagedCacheUnavailable, "delete legacy Azure Identity cache key", nil),
+			want: false,
+		},
+		{
+			name: "ManagedCacheConflict (confirmed still present) is never ambiguous",
 			err:  managedError(ManagedCacheConflict, "verify legacy Azure Identity cache key deletion", nil),
 			want: false,
 		},
@@ -42,6 +50,24 @@ func TestIsAmbiguousLegacyKeyringFailure(t *testing.T) {
 				t.Fatalf("isAmbiguousLegacyKeyringFailure(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestInconclusiveLegacyKeyringErrorStillClassifiesCorrectly(t *testing.T) {
+	// The sentinel wrapper must not break ManagedErrorClassOf for every other
+	// existing consumer of these errors -- it only adds a narrower, separate
+	// way to identify the ambiguous subset.
+	err := inconclusiveLegacyKeyringError(ManagedCacheUnavailable, "open legacy Azure Identity keyring", nil)
+	class, ok := ManagedErrorClassOf(err)
+	if !ok {
+		t.Fatal("expected ManagedErrorClassOf to recognise the wrapped error")
+	}
+	if class != ManagedCacheUnavailable {
+		t.Fatalf("class = %v, want %v", class, ManagedCacheUnavailable)
+	}
+	var managed *ManagedError
+	if !errors.As(err, &managed) {
+		t.Fatal("expected errors.As to unwrap to the underlying *ManagedError")
 	}
 }
 
