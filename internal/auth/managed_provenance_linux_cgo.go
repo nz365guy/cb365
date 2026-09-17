@@ -129,6 +129,13 @@ func deleteManagedChannelMessageProvenanceReferences(
 		secretID := profile.ManagedDelegated.ChannelMessageProvenance[lookupKey]
 		secret, err := store.Get(ctx, secretID)
 		if err != nil {
+			if isManagedSecretAbsent(err) {
+				// A prior logout attempt may have deleted this record and then
+				// failed at a later step before the profile could be saved.
+				// Retrying logout must finish rather than wedge on a record
+				// that is already gone.
+				continue
+			}
 			return managedError(ManagedCacheUnavailable, "read channel-message provenance for logout", err)
 		}
 		if secret == nil || secret.ID != secretID ||
