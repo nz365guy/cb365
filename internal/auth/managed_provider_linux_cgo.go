@@ -101,7 +101,10 @@ func ResumeManagedDelegatedMigration(_ context.Context, profile *config.Profile)
 		return err
 	}
 	defer lock.Close()
-	return cleanupLegacyDelegated(profile.Name)
+	// Best-effort: this is cleaning up whatever legacy artifacts might
+	// predate this profile's migration to the managed cache, not the
+	// managed credential itself -- see cleanupLegacyDelegated's doc comment.
+	return cleanupLegacyDelegated(profile.Name, true)
 }
 
 func NewManagedDelegatedCredential(profile *config.Profile, ipv4Only bool) (azcore.TokenCredential, error) {
@@ -202,7 +205,12 @@ func DeleteManagedDelegated(ctx context.Context, profile *config.Profile) error 
 	if err := deleteManagedRecordLocked(ctx, profile, host); err != nil {
 		return err
 	}
-	return cleanupLegacyDelegated(profile.Name)
+	// Best-effort: the actual managed credential (provenance + record) is
+	// already deleted above. This step only cleans up whatever legacy
+	// artifacts might predate this profile's migration -- see
+	// cleanupLegacyDelegated's doc comment for why an inconclusive result
+	// here must not block a logout that already removed the real secret.
+	return cleanupLegacyDelegated(profile.Name, true)
 }
 
 // DiscardManagedDelegatedMigration removes only the newly-created BWS record.

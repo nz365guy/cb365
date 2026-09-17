@@ -77,10 +77,31 @@ func (s *legacyDelegatedState) cleanupAndVerify() error {
 	if s == nil || s.profileName == "" {
 		return managedError(ManagedCacheInvalid, "clean up legacy delegated credential", nil)
 	}
-	return cleanupLegacyDelegated(s.profileName)
+	// Strict: inspectLegacyDelegated already read a real legacy token from
+	// disk to get here, so a leftover keyring entry is a known possibility,
+	// not a guess -- an inconclusive result must still fail closed.
+	return cleanupLegacyDelegated(s.profileName, false)
 }
 
-func cleanupLegacyDelegated(profileName string) error {
+// cleanupLegacyDelegated removes every legacy (pre-managed-cache) credential
+// layer for profileName: token store metadata, cache files, and the OS
+// keyring entry.
+//
+// keyringCleanupBestEffort controls only the final keyring step. A managed
+// (BWS-backed) profile's logout calls this purely as defensive cleanup of
+// whatever legacy artifacts might predate its migration -- by the time it
+// runs, the actual credential (the managed record and its provenance) is
+// already deleted. On this path, an inconclusive keyring result (e.g. EACCES
+// searching a persistent keyring this process doesn't hold full possessor
+// rights to -- observed on vm-openclaw-01, not evidence a key exists) must
+// not block a logout that has already removed the real secret. A
+// *confirmed* leftover key (ManagedCacheConflict: found, unlink attempted,
+// still present on re-search) still fails even in this mode -- that is a
+// genuine problem, not an ambiguity. The true legacy path above
+// (cleanupAndVerify) never sets this: there, inspectLegacyDelegated has
+// already proven a legacy credential exists, so "inconclusive" must stay a
+// hard failure.
+func cleanupLegacyDelegated(profileName string, keyringCleanupBestEffort bool) error {
 	if profileName == "" {
 		return managedError(ManagedCacheInvalid, "clean up legacy delegated credential", nil)
 	}
@@ -120,9 +141,23 @@ func cleanupLegacyDelegated(profileName string) error {
 	}
 	locks = nil
 	if err := deleteLegacyAzureIdentityKey(); err != nil {
+		if keyringCleanupBestEffort && isAmbiguousLegacyKeyringFailure(err) {
+			return nil
+		}
 		return err
 	}
 	return nil
+}
+
+// isAmbiguousLegacyKeyringFailure reports whether err from
+// deleteLegacyAzureIdentityKey represents an inconclusive result -- the
+// keyring couldn't be searched or opened for a definite answer -- rather
+// than a confirmed leftover key. Only the former is ever safe to tolerate,
+// and only in a best-effort context that already knows the real credential
+// is gone.
+func isAmbiguousLegacyKeyringFailure(err error) bool {
+	class, ok := ManagedErrorClassOf(err)
+	return ok && class == ManagedCacheUnavailable
 }
 
 func verifyLegacyTokenStorePermissions(store tokenStore, required bool) error {
