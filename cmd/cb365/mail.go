@@ -126,6 +126,13 @@ func formatMessageJSON(msg models.Messageable) map[string]interface{} {
 	}
 	if msg.GetSentDateTime() != nil {
 		item["sent_at"] = msg.GetSentDateTime().Format(time.RFC3339)
+		item["is_sent"] = true
+	}
+	if msg.GetIsDraft() != nil {
+		item["is_draft"] = *msg.GetIsDraft()
+	}
+	if msg.GetConversationId() != nil {
+		item["conversation_id"] = deref(msg.GetConversationId())
 	}
 	if msg.GetLastModifiedDateTime() != nil {
 		item["last_modified_at"] = msg.GetLastModifiedDateTime().Format(time.RFC3339)
