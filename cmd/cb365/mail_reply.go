@@ -88,10 +88,10 @@ var mailReplyCmd = &cobra.Command{
 		if !mailReplyAll && (strings.TrimSpace(mailReplyTo) != "" || strings.TrimSpace(mailReplyCC) != "") {
 			patch := models.NewMessage()
 			if to := parseRecipients(mailReplyTo); len(to) > 0 {
-				patch.SetToRecipients(append(draft.GetToRecipients(), to...))
+				patch.SetToRecipients(mergeRecipients(draft.GetToRecipients(), to))
 			}
 			if cc := parseRecipients(mailReplyCC); len(cc) > 0 {
-				patch.SetCcRecipients(append(draft.GetCcRecipients(), cc...))
+				patch.SetCcRecipients(mergeRecipients(draft.GetCcRecipients(), cc))
 			}
 			if draft, err = client.Me().Messages().ByMessageId(draftID).Patch(ctx, patch, nil); err != nil {
 				return fmt.Errorf("adding recipients to reply draft: %w", err)
@@ -115,6 +115,37 @@ var mailReplyCmd = &cobra.Command{
 		output.Success(fmt.Sprintf("Sent reply in thread %s", replyToID))
 		return nil
 	},
+}
+
+// mergeRecipients keeps the provider-derived reply recipients and adds only
+// explicit addresses that are not already present, case-insensitively.
+func mergeRecipients(existing, additions []models.Recipientable) []models.Recipientable {
+	merged := append([]models.Recipientable{}, existing...)
+	seen := make(map[string]struct{}, len(existing))
+	for _, recipient := range existing {
+		if recipient == nil || recipient.GetEmailAddress() == nil {
+			continue
+		}
+		address := strings.ToLower(strings.TrimSpace(deref(recipient.GetEmailAddress().GetAddress())))
+		if address != "" {
+			seen[address] = struct{}{}
+		}
+	}
+	for _, recipient := range additions {
+		if recipient == nil || recipient.GetEmailAddress() == nil {
+			continue
+		}
+		address := strings.ToLower(strings.TrimSpace(deref(recipient.GetEmailAddress().GetAddress())))
+		if address == "" {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		merged = append(merged, recipient)
+	}
+	return merged
 }
 
 func init() {

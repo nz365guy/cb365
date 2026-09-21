@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
+)
 
 func preserveMailReplyGlobals(t *testing.T) {
 	t.Helper()
@@ -51,5 +55,16 @@ func TestMailReplyDryRunDoesNotAuthenticate(t *testing.T) {
 	flagDryRun = true
 	if err := mailReplyCmd.RunE(mailReplyCmd, nil); err != nil {
 		t.Fatalf("dry run should stop before authentication: %v", err)
+	}
+}
+
+func TestMergeRecipientsDoesNotDuplicateProviderDerivedReplyTarget(t *testing.T) {
+	existing := []models.Recipientable{makeRecipient("Sender@Example.com")}
+	merged := mergeRecipients(existing, []models.Recipientable{
+		makeRecipient("sender@example.com"),
+		makeRecipient("copy@example.com"),
+	})
+	if len(merged) != 2 {
+		t.Fatalf("expected provider recipient plus one explicit recipient, got %d", len(merged))
 	}
 }
