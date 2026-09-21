@@ -2,7 +2,7 @@
 
 **Scriptable access to Microsoft 365 from the command line.**
 
-If you need to automate Microsoft 365 — create tasks, send mail, manage calendars, post to Teams, work with SharePoint, OneDrive, or Planner — you currently have two options: write a custom app against the Graph API, or click through the UI by hand. cb365 gives you a third: a single command-line tool that does it all, with structured output that scripts and AI agents can consume directly.
+If you need to automate Microsoft 365 — create tasks, send mail, manage calendars, post to Teams, work with SharePoint, OneDrive, or Planner — you currently have two options: write a custom app against the Graph API, or click through the UI by hand. cb365 gives you a third: a single command-line tool that does it all, with structured output that scripts and AI agents can consume directly. See `DECOMMISSIONED.md` for what was removed from this repo in September 2026.
 
 ```bash
 # List your tasks as JSON
@@ -274,6 +274,7 @@ secrets use the dedicated stdin/certificate flow described above.
 |---------|-------------|
 | `cb365 mail list` | List inbox messages |
 | `cb365 mail list-folder --folder FOLDER [--filter FILTER] [--order-by ORDER]` | List messages in a specific folder, including last-modified time; align filter/order fields for Graph efficient filters |
+| `cb365 mail delta-folder --folder FOLDER [--state-file PATH]` | Follow every Graph message-delta page and persist a folder-scoped delta link; expired links trigger one bounded full resynchronisation and incomplete cycles are recorded in state |
 | `cb365 mail get --id ID` | Get a single message |
 | `cb365 mail mark-read --id ID --confirm` | Mark one message as read after an explicit confirmation gate |
 | `cb365 mail move --id ID --destination FOLDER --confirm` | Move one message to another folder |
@@ -552,7 +553,7 @@ Loop workspaces use SharePoint Embedded (SPE), which requires additional setup b
 
 ### Workspace Discovery
 
-Loop workspace IDs are not discoverable via Graph API. You need to populate a local config file:
+Loop workspace IDs cannot be looked up via Graph API. You need to populate a local config file:
 
 ```bash
 # Location: ~/.config/cb365/loop-workspaces.json

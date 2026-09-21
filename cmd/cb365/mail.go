@@ -8,6 +8,7 @@ import (
 
 	"os"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	"github.com/nz365guy/cb365/internal/output"
@@ -147,6 +148,33 @@ func formatMessageJSON(msg models.Messageable) map[string]interface{} {
 		item["importance"] = msg.GetImportance().String()
 	}
 	item["body_preview"] = deref(msg.GetBodyPreview())
+	if msg.GetInternetMessageId() != nil {
+		item["internet_message_id"] = deref(msg.GetInternetMessageId())
+	}
+	authenticationHeaders := map[string]string{}
+	metadataHeaders := map[string]string{}
+	for _, header := range msg.GetInternetMessageHeaders() {
+		if header == nil || header.GetName() == nil || header.GetValue() == nil {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(deref(header.GetName())))
+		switch name {
+		case "authentication-results", "arc-authentication-results", "received-spf":
+			if _, exists := authenticationHeaders[name]; !exists {
+				authenticationHeaders[name] = deref(header.GetValue())
+			}
+		case "message-id", "x-github-recipient", "x-github-recipient-address", "cc", "list-id":
+			if _, exists := metadataHeaders[name]; !exists {
+				metadataHeaders[name] = deref(header.GetValue())
+			}
+		}
+	}
+	if len(metadataHeaders) > 0 {
+		item["metadata_headers"] = metadataHeaders
+	}
+	if len(authenticationHeaders) > 0 {
+		item["authentication_headers"] = authenticationHeaders
+	}
 
 	return item
 }
@@ -268,6 +296,23 @@ var mailListCmd = &cobra.Command{
 // ══════════════════════════════════════════════
 
 var mailGetID string
+var mailGetImmutableID bool
+
+func newMailGetRequestConfiguration(immutable bool) *users.ItemMessagesMessageItemRequestBuilderGetRequestConfiguration {
+	config := &users.ItemMessagesMessageItemRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMessagesMessageItemRequestBuilderGetQueryParameters{
+			Select: []string{"id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
+				"receivedDateTime", "sentDateTime", "lastModifiedDateTime", "isRead", "hasAttachments",
+				"importance", "bodyPreview", "body", "conversationId", "webLink",
+				"internetMessageId", "internetMessageHeaders"},
+		},
+	}
+	if immutable {
+		config.Headers = abstractions.NewRequestHeaders()
+		config.Headers.Add("Prefer", "IdType=\"ImmutableId\"")
+	}
+	return config
+}
 
 var mailGetCmd = &cobra.Command{
 	Use:   "get",
@@ -285,7 +330,7 @@ var mailGetCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		msg, err := client.Me().Messages().ByMessageId(mailGetID).Get(ctx, nil)
+		msg, err := client.Me().Messages().ByMessageId(mailGetID).Get(ctx, newMailGetRequestConfiguration(mailGetImmutableID))
 		if err != nil {
 			return fmt.Errorf("fetching message: %w", err)
 		}
@@ -586,6 +631,7 @@ func init() {
 
 	// mail get
 	mailGetCmd.Flags().StringVar(&mailGetID, "id", "", "Message ID")
+	mailGetCmd.Flags().BoolVar(&mailGetImmutableID, "immutable-id", false, "Return an immutable message identifier")
 
 	// mail send
 	mailSendCmd.Flags().StringVar(&mailSendTo, "to", "", "Recipient email (comma-separated for multiple)")

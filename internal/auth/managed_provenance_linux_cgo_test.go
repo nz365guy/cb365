@@ -110,6 +110,44 @@ func TestManagedLogoutDeletesAndVerifiesEveryBoundProvenanceRecord(t *testing.T)
 	}
 }
 
+func TestManagedLogoutRetryToleratesAlreadyDeletedProvenanceRecord(t *testing.T) {
+	store := &fakeProvenanceStore{fakeManagedStore: newFakeManagedStore()}
+	profile := testManagedProvenanceProfile()
+	binding, err := managedProfileBinding(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.ManagedDelegated.ChannelMessageProvenance = make(map[string]string)
+	for index, target := range []ManagedChannelMessageTarget{
+		{TeamID: "team-a", ChannelID: "channel-a", MessageID: "message-a"},
+		{TeamID: "team-b", ChannelID: "channel-b", MessageID: "message-b"},
+	} {
+		reference, err := recordManagedChannelMessageProvenance(
+			context.Background(), store, profile, binding, target, "host",
+			func() time.Time { return time.Date(2026, 7, 21, 11, index, 0, 0, time.UTC) },
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile.ManagedDelegated.ChannelMessageProvenance[ManagedChannelMessageProvenanceKey(target)] = reference
+	}
+
+	// Simulate an earlier logout attempt that deleted one record from BWS but
+	// then failed at a later cleanup step before the profile could be saved,
+	// so the (now-dangling) reference is still present on retry.
+	for _, reference := range profile.ManagedDelegated.ChannelMessageProvenance {
+		delete(store.secrets, reference)
+		break
+	}
+
+	if err := deleteManagedChannelMessageProvenanceReferences(context.Background(), store, profile, binding, "host"); err != nil {
+		t.Fatalf("retried logout provenance cleanup should tolerate an already-deleted record: %v", err)
+	}
+	if len(store.secrets) != 0 {
+		t.Fatalf("retried logout left %d provenance records", len(store.secrets))
+	}
+}
+
 func TestManagedLogoutRefusesUnboundProvenanceReference(t *testing.T) {
 	store := &fakeProvenanceStore{fakeManagedStore: newFakeManagedStore()}
 	profile := testManagedProvenanceProfile()
