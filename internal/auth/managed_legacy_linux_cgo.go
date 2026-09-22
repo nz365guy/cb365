@@ -91,8 +91,8 @@ func (s *legacyDelegatedState) cleanupAndVerify() error {
 // the specific sub-failures isAmbiguousLegacyKeyringFailure recognises as
 // genuinely inconclusive (the ring couldn't be opened or searched for a
 // definite answer -- e.g. EACCES searching a persistent keyring this process
-// doesn't hold full possessor rights to, observed on vm-openclaw-01, not
-// evidence a key exists). A key that was actually found but couldn't be
+// doesn't hold full possessor rights to, not evidence a key exists). A key
+// that was actually found but couldn't be
 // deleted, or confirmed still present after deletion was attempted, is never
 // tolerated regardless of this flag -- that is a known problem, not an
 // ambiguity.

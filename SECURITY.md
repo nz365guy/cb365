@@ -16,7 +16,7 @@ You will receive an acknowledgement within 48 hours and a detailed response with
 ## Security Design Principles
 
 ### Token Storage
-- Managed delegated bearer material is stored only in a profile-bound Bitwarden Secrets Manager EU record.
+- Managed delegated bearer material is stored only in a profile-bound approved secret-manager record.
 - App-only credentials use the operating system keychain, with a profile-bound AES-256-GCM encrypted-file fallback for headless systems.
 - Tokens are **never** stored in plaintext files.
 - Tokens are **never** logged, even at verbose/debug log levels.

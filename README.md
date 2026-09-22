@@ -81,7 +81,7 @@ sudo mv cb365 /usr/local/bin/
 7. Add the scopes you need (see [Scopes by Workload](#scopes-by-workload) below)
 8. Click **Grant admin consent** if you are a tenant admin, or ask your admin to consent
 
-> **Headless environment?** Delegated authentication uses Bitwarden Secrets Manager EU. For the app-only encrypted-file fallback, inject `CB365_KEYRING_PASSWORD` at process start from an approved secret manager; never place it in a shell profile, command line, repository, or service file.
+> **Headless environment?** Delegated authentication uses an approved secret manager. For the app-only encrypted-file fallback, inject `CB365_KEYRING_PASSWORD` at process start from an approved secret manager; never place it in a shell profile, command line, repository, or service file.
 
 ### Authenticate (2 minutes)
 
@@ -136,7 +136,7 @@ cb365 auth login \
   --name work
 ```
 
-Delegated bearer material is stored only in the profile-bound Bitwarden Secrets Manager EU record. The machine-account credential is accepted only from the injected `BWS_ACCESS_TOKEN` environment boundary; there is no CLI flag, local token-store, Azure Identity cache, or plaintext fallback. The initial managed target is Linux with cgo; unsupported builds fail closed.
+Delegated bearer material is stored only in the profile-bound approved secret-manager record. The machine-account credential is accepted only from the injected secret-manager environment boundary; there is no CLI flag, local token-store, Azure Identity cache, or plaintext fallback. The initial managed target is Linux with cgo; unsupported builds fail closed.
 
 Tokens auto-refresh silently through the BWS-backed MSAL cache, subject to Entra policy and revocation. For fully zero-touch workflows, use [app-only auth](#app-only-client-secret) instead.
 
