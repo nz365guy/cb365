@@ -56,7 +56,8 @@ func uploadOneDriveSession(ctx context.Context, client *http.Client, uploadURL s
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(chunk))
 		if err != nil {
-			return nil, fmt.Errorf("building upload request: %w", err)
+			// The URL itself is sensitive and may be included in request errors.
+			return nil, fmt.Errorf("building upload request failed")
 		}
 		req.ContentLength = int64(len(chunk))
 		req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
@@ -81,11 +82,25 @@ func uploadOneDriveSession(ctx context.Context, client *http.Client, uploadURL s
 			if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&item); err != nil {
 				return nil, fmt.Errorf("reading completed upload response: %w", err)
 			}
+			if err := validateOneDriveUploadedItem(&item); err != nil {
+				return nil, err
+			}
 			return &item, nil
 		}
 		start = end + 1
 	}
 	return nil, fmt.Errorf("upload session completed without a file response")
+}
+
+func validateOneDriveUploadedItem(item *odUploadedItem) error {
+	if item == nil || strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Name) == "" {
+		return fmt.Errorf("completed upload response is missing the file identity")
+	}
+	webURL, err := url.Parse(item.WebURL)
+	if err != nil || webURL.Scheme != "https" || webURL.Host == "" || webURL.User != nil {
+		return fmt.Errorf("completed upload response is missing a valid HTTPS file URL")
+	}
+	return nil
 }
 
 func validateOneDriveUploadSize(size int64) error {

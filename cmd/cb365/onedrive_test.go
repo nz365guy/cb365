@@ -182,6 +182,38 @@ func TestOneDriveUploadSessionRejectsNonHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestOneDriveUploadRequiresCompleteResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		item odUploadedItem
+	}{
+		{"missing identity", odUploadedItem{}},
+		{"missing name", odUploadedItem{ID: "id", WebURL: "https://example.test/file"}},
+		{"non-HTTPS web URL", odUploadedItem{ID: "id", Name: "file", WebURL: "http://example.test/file"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateOneDriveUploadedItem(&tc.item); err == nil {
+				t.Fatal("expected incomplete upload response to be rejected")
+			}
+		})
+	}
+	valid := &odUploadedItem{ID: "id", Name: "file", WebURL: "https://example.test/file"}
+	if err := validateOneDriveUploadedItem(valid); err != nil {
+		t.Fatalf("valid uploaded item rejected: %v", err)
+	}
+}
+
+func TestOneDriveUploadSessionDoesNotAcceptEmptySuccessBody(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	if _, err := uploadOneDriveSession(context.Background(), server.Client(), server.URL, strings.NewReader("x"), 1); err == nil {
+		t.Fatal("expected empty drive item response to be rejected")
+	}
+}
+
 func TestOnedriveLsPathAndItemIDFlags(t *testing.T) {
 	cmd := onedriveLsCmd
 	pathFlag := cmd.Flags().Lookup("path")
