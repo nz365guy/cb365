@@ -11,6 +11,12 @@ import (
 	"github.com/nz365guy/cb365/internal/config"
 )
 
+func TestManagedDelegatedAvailableInLinuxCGOBuild(t *testing.T) {
+	if !ManagedDelegatedAvailable() {
+		t.Fatal("Linux/cgo build must include the managed delegated provider")
+	}
+}
+
 func TestLegacyCachePermissionsAreCheckedBeforeMigration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
