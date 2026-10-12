@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -128,6 +129,28 @@ func validateOneDriveUploadSize(size int64) error {
 		return fmt.Errorf("file is %s — maximum upload size is 45 MiB", humanFileSize(size))
 	}
 	return nil
+}
+
+func oneDriveUploadSessionURL(baseURL, driveID, parentItemID, fileName string) (string, error) {
+	base, err := url.Parse(baseURL)
+	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		return "", fmt.Errorf("Graph client has an invalid base URL")
+	}
+	if strings.TrimSpace(driveID) == "" || strings.TrimSpace(parentItemID) == "" || fileName == "" || strings.ContainsAny(fileName, `/\\`) {
+		return "", fmt.Errorf("upload destination is invalid")
+	}
+	basePath := strings.TrimRight(base.Path, "/")
+	return fmt.Sprintf("%s://%s%s/drives/%s/items/%s:/%s:/createUploadSession",
+		base.Scheme, base.Host, basePath, url.PathEscape(driveID), url.PathEscape(parentItemID), url.PathEscape(fileName)), nil
+}
+
+func oneDriveParentPath(cleanPath string) string {
+	cleanPath = strings.Trim(strings.ReplaceAll(cleanPath, `\`, "/"), "/")
+	parent := path.Dir(cleanPath)
+	if parent == "." || parent == "" {
+		return "root"
+	}
+	return "root:/" + parent + ":"
 }
 
 // ──────────────────────────────────────────────
@@ -530,11 +553,11 @@ Examples:
 			return fmt.Errorf("getting user drive: %w", err)
 		}
 		driveID := deref(drive.GetId())
+		cleanPath := strings.TrimPrefix(strings.ReplaceAll(pathFlag, `\`, "/"), "/")
+		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
 
 		// Check if target already exists (unless --force)
 		if !forceFlag {
-			cleanPath := strings.TrimPrefix(pathFlag, "/")
-			itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
 			_, existErr := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Get(ctx, nil)
 			if existErr == nil {
 				return fmt.Errorf("file already exists at %s — use --force to overwrite", pathFlag)
@@ -550,8 +573,6 @@ Examples:
 		}
 
 		// Upload via PUT /drives/{id}/items/root:/{path}:/content
-		cleanPath := strings.TrimPrefix(pathFlag, "/")
-		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
 		var uploaded models.DriveItemable
 		if info.Size() <= odSimpleUploadLimit {
 			content, err := os.ReadFile(fileFlag) // #nosec G304 — user-specified file
@@ -563,7 +584,7 @@ Examples:
 				return fmt.Errorf("uploading file: %w", err)
 			}
 		} else {
-			itemName := filepath.Base(cleanPath)
+			itemName := path.Base(cleanPath)
 			item := models.NewDriveItemUploadableProperties()
 			item.SetName(&itemName)
 			conflictBehavior := "fail"
@@ -573,7 +594,20 @@ Examples:
 			item.GetAdditionalData()["@microsoft.graph.conflictBehavior"] = conflictBehavior
 			body := drivesPkg.NewItemItemsItemCreateUploadSessionPostRequestBody()
 			body.SetItem(item)
-			session, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).CreateUploadSession().Post(ctx, body, nil)
+			parent, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(oneDriveParentPath(cleanPath)).Get(ctx, nil)
+			if err != nil {
+				return fmt.Errorf("resolving upload destination folder failed")
+			}
+			parentID := deref(parent.GetId())
+			if parentID == "" {
+				return fmt.Errorf("Graph returned an upload destination folder without an ID")
+			}
+			sessionURL, err := oneDriveUploadSessionURL(client.BaseRequestBuilder.PathParameters["baseurl"], driveID, parentID, itemName)
+			if err != nil {
+				return err
+			}
+			sessionBuilder := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).CreateUploadSession().WithUrl(sessionURL)
+			session, err := sessionBuilder.Post(ctx, body, nil)
 			if err != nil {
 				return fmt.Errorf("creating upload session: %w", err)
 			}

@@ -9,6 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	kiota "github.com/microsoft/kiota-abstractions-go"
+	khttp "github.com/microsoft/kiota-http-go"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	drivesPkg "github.com/microsoftgraph/msgraph-sdk-go/drives"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 )
 
 // ──────────────────────────────────────────────
@@ -235,6 +241,77 @@ func TestOneDriveUploadSessionReportsResponseCloseFailureWithoutDetails(t *testi
 	_, err := uploadOneDriveSession(context.Background(), client, "https://example.test/upload", strings.NewReader("x"), 1)
 	if err == nil || err.Error() != "closing upload response failed" {
 		t.Fatalf("expected bounded response close error, got %v", err)
+	}
+}
+
+func TestOneDriveUploadSessionUsesDocumentedParentAndFilenameRoute(t *testing.T) {
+	fileName := "90 day & story #1.mp4"
+	got, err := oneDriveUploadSessionURL("https://graph.microsoft.com/v1.0", "drive-id", "parent!stable-id", fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://graph.microsoft.com/v1.0/drives/drive-id/items/parent%21stable-id:/90%20day%20&%20story%20%231.mp4:/createUploadSession"
+	if got != want {
+		t.Fatalf("session URL = %q, want %q", got, want)
+	}
+
+	var capturedURL string
+	var capturedBody []byte
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		capturedURL = request.URL.String()
+		capturedBody, _ = io.ReadAll(request.Body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"uploadUrl":"https://upload.example/session","expirationDateTime":"2026-10-13T00:00:00Z"}`)),
+			Request:    request,
+		}, nil
+	})
+	adapter, err := khttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
+		noOpGraphAuth{}, nil, nil, &http.Client{Transport: transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := msgraphsdk.NewGraphServiceClient(adapter)
+	client.BaseRequestBuilder.PathParameters["baseurl"] = "https://graph.microsoft.com/v1.0"
+	item := models.NewDriveItemUploadableProperties()
+	item.SetName(&fileName)
+	body := drivesPkg.NewItemItemsItemCreateUploadSessionPostRequestBody()
+	body.SetItem(item)
+	requestBuilder := client.Drives().ByDriveId("drive-id").Items().ByDriveItemId("parent!stable-id").CreateUploadSession().WithUrl(got)
+	_, err = requestBuilder.Post(context.Background(), body, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capturedURL != want {
+		t.Fatalf("SDK HTTP request URL = %q, want %q", capturedURL, want)
+	}
+	if !bytes.Contains(capturedBody, []byte(`"name":"90 day & story #1.mp4"`)) {
+		t.Fatalf("SDK HTTP request body does not contain exact filename: %s", capturedBody)
+	}
+}
+
+type noOpGraphAuth struct{}
+
+func (noOpGraphAuth) AuthenticateRequest(context.Context, *kiota.RequestInformation, map[string]interface{}) error {
+	return nil
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestOneDriveParentPathUsesGraphSlashSeparators(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"video.mp4", "root"},
+		{"Testimonial Library/video.mp4", "root:/Testimonial Library:"},
+		{`Testimonial Library\\video.mp4`, "root:/Testimonial Library:"},
+	} {
+		if got := oneDriveParentPath(tc.input); got != tc.want {
+			t.Errorf("oneDriveParentPath(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }
 
