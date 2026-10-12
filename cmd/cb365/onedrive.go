@@ -438,7 +438,7 @@ Examples:
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
 		// Get the user's drive
