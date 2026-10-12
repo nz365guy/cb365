@@ -43,7 +43,7 @@ jobs:
           version_json="$(./dist/cb365-linux-amd64 --json version)"
           export CB365_EXPECT_VERSION="$version" CB365_EXPECT_COMMIT="$commit"
           printf '%s' "$version_json" | python3 -c 'import json,os,sys; data=json.load(sys.stdin); assert data["version"] == os.environ["CB365_EXPECT_VERSION"]; assert data["commit"] == os.environ["CB365_EXPECT_COMMIT"]'
-          go version -m dist/cb365-linux-amd64 | grep -F 'build CGO_ENABLED=1'
+          go version -m dist/cb365-linux-amd64 | grep -E 'build[[:space:]]+CGO_ENABLED=1'
           (
             cd dist
             sha256sum cb365-linux-amd64 > SHA256SUMS
