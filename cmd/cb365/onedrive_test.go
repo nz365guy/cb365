@@ -214,6 +214,30 @@ func TestOneDriveUploadSessionDoesNotAcceptEmptySuccessBody(t *testing.T) {
 	}
 }
 
+type uploadTestRoundTripper func(*http.Request) (*http.Response, error)
+
+func (rt uploadTestRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return rt(req)
+}
+
+type closeErrorBody struct{ io.Reader }
+
+func (closeErrorBody) Close() error { return fmt.Errorf("signed capability must not escape") }
+
+func TestOneDriveUploadSessionReportsResponseCloseFailureWithoutDetails(t *testing.T) {
+	client := &http.Client{Transport: uploadTestRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Body:       closeErrorBody{Reader: strings.NewReader(`{"id":"id","name":"file","webUrl":"https://example.test/file"}`)},
+			Header:     make(http.Header),
+		}, nil
+	})}
+	_, err := uploadOneDriveSession(context.Background(), client, "https://example.test/upload", strings.NewReader("x"), 1)
+	if err == nil || err.Error() != "closing upload response failed" {
+		t.Fatalf("expected bounded response close error, got %v", err)
+	}
+}
+
 func TestOnedriveLsPathAndItemIDFlags(t *testing.T) {
 	cmd := onedriveLsCmd
 	pathFlag := cmd.Flags().Lookup("path")

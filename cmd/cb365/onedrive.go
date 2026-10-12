@@ -69,18 +69,26 @@ func uploadOneDriveSession(ctx context.Context, client *http.Client, uploadURL s
 			return nil, fmt.Errorf("sending upload chunk failed")
 		}
 		if end+1 < size {
-			resp.Body.Close()
+			if err := closeOneDriveUploadResponse(resp); err != nil {
+				return nil, err
+			}
 			if resp.StatusCode != http.StatusAccepted {
 				return nil, fmt.Errorf("upload session rejected a chunk (HTTP %d)", resp.StatusCode)
 			}
 		} else {
-			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+				if err := closeOneDriveUploadResponse(resp); err != nil {
+					return nil, err
+				}
 				return nil, fmt.Errorf("upload session did not complete (HTTP %d)", resp.StatusCode)
 			}
 			var item odUploadedItem
-			if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&item); err != nil {
-				return nil, fmt.Errorf("reading completed upload response: %w", err)
+			decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&item)
+			if err := closeOneDriveUploadResponse(resp); err != nil {
+				return nil, err
+			}
+			if decodeErr != nil {
+				return nil, fmt.Errorf("reading completed upload response: %w", decodeErr)
 			}
 			if err := validateOneDriveUploadedItem(&item); err != nil {
 				return nil, err
@@ -90,6 +98,15 @@ func uploadOneDriveSession(ctx context.Context, client *http.Client, uploadURL s
 		start = end + 1
 	}
 	return nil, fmt.Errorf("upload session completed without a file response")
+}
+
+func closeOneDriveUploadResponse(resp *http.Response) error {
+	if resp != nil && resp.Body != nil {
+		if err := resp.Body.Close(); err != nil {
+			return fmt.Errorf("closing upload response failed")
+		}
+	}
+	return nil
 }
 
 func validateOneDriveUploadedItem(item *odUploadedItem) error {
