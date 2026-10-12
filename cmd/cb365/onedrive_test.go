@@ -256,9 +256,13 @@ func TestOneDriveUploadSessionUsesDocumentedParentAndFilenameRoute(t *testing.T)
 	}
 
 	var capturedURL string
+	var capturedMethod string
+	var capturedContentType string
 	var capturedBody []byte
 	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 		capturedURL = request.URL.String()
+		capturedMethod = request.Method
+		capturedContentType = request.Header.Get("Content-Type")
 		capturedBody, _ = io.ReadAll(request.Body)
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -276,6 +280,7 @@ func TestOneDriveUploadSessionUsesDocumentedParentAndFilenameRoute(t *testing.T)
 	client.BaseRequestBuilder.PathParameters["baseurl"] = "https://graph.microsoft.com/v1.0"
 	item := models.NewDriveItemUploadableProperties()
 	item.SetName(&fileName)
+	item.GetAdditionalData()["@microsoft.graph.conflictBehavior"] = "fail"
 	body := drivesPkg.NewItemItemsItemCreateUploadSessionPostRequestBody()
 	body.SetItem(item)
 	requestBuilder := client.Drives().ByDriveId("drive-id").Items().ByDriveItemId("parent!stable-id").CreateUploadSession().WithUrl(got)
@@ -286,8 +291,11 @@ func TestOneDriveUploadSessionUsesDocumentedParentAndFilenameRoute(t *testing.T)
 	if capturedURL != want {
 		t.Fatalf("SDK HTTP request URL = %q, want %q", capturedURL, want)
 	}
-	if !bytes.Contains(capturedBody, []byte(`"name":"90 day & story #1.mp4"`)) {
-		t.Fatalf("SDK HTTP request body does not contain exact filename: %s", capturedBody)
+	if capturedMethod != http.MethodPost || !strings.Contains(capturedContentType, "application/json") {
+		t.Fatalf("SDK request method/content-type = %q/%q, want POST/application-json", capturedMethod, capturedContentType)
+	}
+	if !bytes.Contains(capturedBody, []byte(`"name":"90 day & story #1.mp4"`)) || !bytes.Contains(capturedBody, []byte(`"@microsoft.graph.conflictBehavior":"fail"`)) {
+		t.Fatalf("SDK HTTP request body is missing expected name/conflictBehavior fields: %s", capturedBody)
 	}
 }
 
@@ -311,6 +319,51 @@ func TestOneDriveParentPathUsesGraphSlashSeparators(t *testing.T) {
 	} {
 		if got := oneDriveParentPath(tc.input); got != tc.want {
 			t.Errorf("oneDriveParentPath(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestOneDriveUploadSessionFailureShowsSafeRequestDiagnostics(t *testing.T) {
+	filename := "report #1.mp4"
+	const sessionURL = "https://graph.microsoft.com/v1.0/drives/secret-drive/items/secret-parent:/report%20%231.mp4:/createUploadSession"
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost {
+			t.Errorf("request method = %s, want POST", request.Method)
+		}
+		responseBody := `{"error":{"code":"BadRequest","message":"do not echo this","innerError":{"request-id":"safe-request-id"}}}`
+		return &http.Response{
+			StatusCode:    http.StatusBadRequest,
+			ContentLength: int64(len(responseBody)),
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(strings.NewReader(responseBody)),
+			Request:       request,
+		}, nil
+	})
+	adapter, err := khttp.NewNetHttpRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
+		noOpGraphAuth{}, nil, nil, &http.Client{Transport: transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := msgraphsdk.NewGraphServiceClient(adapter)
+	client.BaseRequestBuilder.PathParameters["baseurl"] = "https://graph.microsoft.com/v1.0"
+	item := models.NewDriveItemUploadableProperties()
+	item.SetName(&filename)
+	item.GetAdditionalData()["@microsoft.graph.conflictBehavior"] = "fail"
+	body := drivesPkg.NewItemItemsItemCreateUploadSessionPostRequestBody()
+	body.SetItem(item)
+	_, err = client.Drives().ByDriveId("secret-drive").Items().ByDriveItemId("secret-parent").CreateUploadSession().WithUrl(sessionURL).Post(context.Background(), body, nil)
+	if err == nil {
+		t.Fatal("expected a Graph error")
+	}
+	diagnostic := oneDriveUploadSessionFailure(err, sessionURL, "secret-drive", "secret-parent", filename, "fail").Error()
+	for _, expected := range []string{"HTTP 400", "Graph code BadRequest", "request-id safe-request-id", "request=POST /v1.0/drives/{drive-id}/items/{parent-id}:/report%20%231.mp4:/createUploadSession", "Content-Type=application/json", "item.@microsoft.graph.conflictBehavior=\"fail\""} {
+		if !strings.Contains(diagnostic, expected) {
+			t.Errorf("diagnostic %q does not contain %q", diagnostic, expected)
+		}
+	}
+	for _, secret := range []string{"secret-drive", "secret-parent", "do not echo this", "graph.microsoft.com"} {
+		if strings.Contains(diagnostic, secret) {
+			t.Errorf("diagnostic leaked %q: %s", secret, diagnostic)
 		}
 	}
 }

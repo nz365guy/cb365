@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	msgraphsdkgo "github.com/microsoftgraph/msgraph-sdk-go"
 	drivesPkg "github.com/microsoftgraph/msgraph-sdk-go/drives"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -151,6 +153,33 @@ func oneDriveParentPath(cleanPath string) string {
 		return "root"
 	}
 	return "root:/" + parent + ":"
+}
+
+func oneDriveUploadSessionFailure(err error, sessionURL, driveID, parentID, fileName, conflictBehavior string) error {
+	status := 0
+	graphCode := "unavailable"
+	requestID := "unavailable"
+	var graphErr *odataerrors.ODataError
+	if errors.As(err, &graphErr) {
+		status = graphErr.GetStatusCode()
+		if detail := graphErr.GetErrorEscaped(); detail != nil {
+			if code := detail.GetCode(); code != nil && *code != "" {
+				graphCode = *code
+			}
+			if inner := detail.GetInnerError(); inner != nil {
+				if id := inner.GetRequestId(); id != nil && *id != "" {
+					requestID = *id
+				}
+			}
+		}
+	}
+	endpoint := "unavailable"
+	if parsed, parseErr := url.Parse(sessionURL); parseErr == nil {
+		endpoint = parsed.EscapedPath()
+		masked := "/drives/" + url.PathEscape(driveID) + "/items/" + url.PathEscape(parentID)
+		endpoint = strings.Replace(endpoint, masked, "/drives/{drive-id}/items/{parent-id}", 1)
+	}
+	return fmt.Errorf("creating upload session failed: HTTP %d, Graph code %s, request-id %s; request=POST %s Content-Type=application/json; body fields item.name=%q, item.@microsoft.graph.conflictBehavior=%q", status, graphCode, requestID, endpoint, fileName, conflictBehavior)
 }
 
 // ──────────────────────────────────────────────
@@ -609,7 +638,7 @@ Examples:
 			sessionBuilder := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(parentID).CreateUploadSession().WithUrl(sessionURL)
 			session, err := sessionBuilder.Post(ctx, body, nil)
 			if err != nil {
-				return fmt.Errorf("creating upload session: %w", err)
+				return oneDriveUploadSessionFailure(err, sessionURL, driveID, parentID, itemName, conflictBehavior)
 			}
 			uploadURL := session.GetUploadUrl()
 			if uploadURL == nil || *uploadURL == "" {
