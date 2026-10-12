@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +19,84 @@ import (
 	"github.com/nz365guy/cb365/internal/output"
 	"github.com/spf13/cobra"
 )
+
+const (
+	odSimpleUploadLimit = int64(4 * 1024 * 1024)
+	odMaxUploadSize     = int64(45 * 1024 * 1024)
+	odUploadChunkSize   = int64(5 * 1024 * 1024) // 16 * 320 KiB, as required by Graph.
+)
+
+type odUploadedItem struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	WebURL string `json:"webUrl"`
+}
+
+// uploadOneDriveSession sends sequential byte ranges to Graph's preauthenticated
+// upload URL. The URL is intentionally never included in errors or logs.
+func uploadOneDriveSession(ctx context.Context, client *http.Client, uploadURL string, file io.ReaderAt, size int64) (*odUploadedItem, error) {
+	parsed, err := url.Parse(uploadURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return nil, fmt.Errorf("Graph returned an invalid upload session URL")
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	for start := int64(0); start < size; {
+		end := start + odUploadChunkSize - 1
+		if end >= size {
+			end = size - 1
+		}
+		chunk := make([]byte, end-start+1)
+		if n, err := file.ReadAt(chunk, start); n != len(chunk) || (err != nil && err != io.EOF) {
+			if err != nil {
+				return nil, fmt.Errorf("reading upload chunk: %w", err)
+			}
+			return nil, fmt.Errorf("reading upload chunk: unexpected end of file")
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, bytes.NewReader(chunk))
+		if err != nil {
+			return nil, fmt.Errorf("building upload request: %w", err)
+		}
+		req.ContentLength = int64(len(chunk))
+		req.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+		// The upload URL is preauthenticated; Graph rejects bearer auth on these PUTs.
+		resp, err := client.Do(req)
+		if err != nil {
+			// net/http includes the request URL in its errors; upload URLs are bearer
+			// capabilities and must not be exposed in terminal or JSON output.
+			return nil, fmt.Errorf("sending upload chunk failed")
+		}
+		if end+1 < size {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusAccepted {
+				return nil, fmt.Errorf("upload session rejected a chunk (HTTP %d)", resp.StatusCode)
+			}
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("upload session did not complete (HTTP %d)", resp.StatusCode)
+			}
+			var item odUploadedItem
+			if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&item); err != nil {
+				return nil, fmt.Errorf("reading completed upload response: %w", err)
+			}
+			return &item, nil
+		}
+		start = end + 1
+	}
+	return nil, fmt.Errorf("upload session completed without a file response")
+}
+
+func validateOneDriveUploadSize(size int64) error {
+	if size <= 0 {
+		return fmt.Errorf("file is empty — refusing to upload a 0-byte file")
+	}
+	if size > odMaxUploadSize {
+		return fmt.Errorf("file is %s — maximum upload size is 45 MiB", humanFileSize(size))
+	}
+	return nil
+}
 
 // ──────────────────────────────────────────────
 //  OneDrive --user flag (app-only auth support)
@@ -372,7 +455,7 @@ var onedriveUploadCmd = &cobra.Command{
 	Long: `Upload a local file to OneDrive.
 
 Safety:
-  - Validates file size before upload (max 4MB for simple upload)
+  - Validates file size before upload (max 45 MiB; resumable sessions above 4 MiB)
   - --force required to overwrite existing files
   - --dry-run to preview
 
@@ -397,14 +480,8 @@ Examples:
 			return fmt.Errorf("reading local file: %w", err)
 		}
 
-		// Safety: size limit for simple upload (4MB)
-		const maxSimpleUpload = 4 * 1024 * 1024
-		if info.Size() > maxSimpleUpload {
-			return fmt.Errorf("file is %s — simple upload limit is 4MB. Large file upload not yet implemented", humanFileSize(info.Size()))
-		}
-
-		if info.Size() == 0 {
-			return fmt.Errorf("file is empty — refusing to upload a 0-byte file")
+		if err := validateOneDriveUploadSize(info.Size()); err != nil {
+			return err
 		}
 
 		client, err := newGraphClient()
@@ -412,7 +489,7 @@ Examples:
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
 
 		// Get the user's drive
@@ -440,18 +517,51 @@ Examples:
 			return nil
 		}
 
-		content, err := os.ReadFile(fileFlag) // #nosec G304 — user-specified file
-		if err != nil {
-			return fmt.Errorf("reading file: %w", err)
-		}
-
 		// Upload via PUT /drives/{id}/items/root:/{path}:/content
 		cleanPath := strings.TrimPrefix(pathFlag, "/")
 		itemByPath := fmt.Sprintf("root:/%s:", cleanPath)
-
-		uploaded, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Put(ctx, content, nil)
-		if err != nil {
-			return fmt.Errorf("uploading file: %w", err)
+		var uploaded models.DriveItemable
+		if info.Size() <= odSimpleUploadLimit {
+			content, err := os.ReadFile(fileFlag) // #nosec G304 — user-specified file
+			if err != nil {
+				return fmt.Errorf("reading file: %w", err)
+			}
+			uploaded, err = client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).Content().Put(ctx, content, nil)
+			if err != nil {
+				return fmt.Errorf("uploading file: %w", err)
+			}
+		} else {
+			itemName := filepath.Base(cleanPath)
+			item := models.NewDriveItemUploadableProperties()
+			item.SetName(&itemName)
+			conflictBehavior := "fail"
+			if forceFlag {
+				conflictBehavior = "replace"
+			}
+			item.GetAdditionalData()["@microsoft.graph.conflictBehavior"] = conflictBehavior
+			body := drivesPkg.NewItemItemsItemCreateUploadSessionPostRequestBody()
+			body.SetItem(item)
+			session, err := client.Drives().ByDriveId(driveID).Items().ByDriveItemId(itemByPath).CreateUploadSession().Post(ctx, body, nil)
+			if err != nil {
+				return fmt.Errorf("creating upload session: %w", err)
+			}
+			uploadURL := session.GetUploadUrl()
+			if uploadURL == nil || *uploadURL == "" {
+				return fmt.Errorf("Graph returned an upload session without an upload URL")
+			}
+			file, err := os.Open(fileFlag) // #nosec G304 — user-specified file
+			if err != nil {
+				return fmt.Errorf("opening file: %w", err)
+			}
+			defer file.Close()
+			result, err := uploadOneDriveSession(ctx, http.DefaultClient, *uploadURL, file, info.Size())
+			if err != nil {
+				return err
+			}
+			uploaded = models.NewDriveItem()
+			uploaded.SetId(&result.ID)
+			uploaded.SetName(&result.Name)
+			uploaded.SetWebUrl(&result.WebURL)
 		}
 
 		format := output.Resolve(flagJSON, flagPlain)

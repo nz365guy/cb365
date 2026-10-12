@@ -359,7 +359,7 @@ URL as the required `Url` and `Description` object for Microsoft Graph.
 |---------|-------------|
 | `cb365 onedrive ls [--path @remote-path.txt]` | List files and folders |
 | `cb365 onedrive get --item-id ID --output ./file` | Download a file |
-| `cb365 onedrive upload --file @local-path.txt --path @remote-path.txt` | Upload a file (max 4MB) |
+| `cb365 onedrive upload --file @local-path.txt --path @remote-path.txt` | Upload a file (max 45 MiB; resumable above 4 MiB) |
 | `cb365 onedrive delete --item-id ID` | Move to recycle bin |
 | `cb365 onedrive mkdir --path @remote-path.txt` | Create a folder |
 

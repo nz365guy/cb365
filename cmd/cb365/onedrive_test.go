@@ -1,6 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -100,6 +107,78 @@ func TestHumanFileSize(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("humanFileSize(%d) = %q, want %q", tt.bytes, result, tt.expected)
 		}
+	}
+}
+
+func TestOneDriveUploadSizeLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int64
+		want bool
+	}{
+		{"empty", 0, false},
+		{"simple boundary", odSimpleUploadLimit, true},
+		{"session boundary", odMaxUploadSize, true},
+		{"above session boundary", odMaxUploadSize + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateOneDriveUploadSize(tc.size); (err == nil) != tc.want {
+				t.Fatalf("validateOneDriveUploadSize(%d) error=%v, want success=%t", tc.size, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestOneDriveUploadSessionChunksWithoutBearerAuth(t *testing.T) {
+	const size = odUploadChunkSize + 17
+	content := make([]byte, size)
+	var calls int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPut {
+			t.Fatalf("method=%s, want PUT", r.Method)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Fatal("upload session PUT must not include an Authorization header")
+		}
+		start := int64(calls-1) * odUploadChunkSize
+		end := min(int64(calls)*odUploadChunkSize, size) - 1
+		wantRange := fmt.Sprintf("bytes %d-%d/%d", start, end, size)
+		if got := r.Header.Get("Content-Range"); got != wantRange {
+			t.Fatalf("Content-Range=%q, want %q", got, wantRange)
+		}
+		chunk, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if int64(len(chunk)) != min(odUploadChunkSize, size-start) {
+			t.Fatalf("chunk length=%d", len(chunk))
+		}
+		if calls == 1 {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"synthetic-id","name":"asset.mp4","webUrl":"https://example.test/asset.mp4"}`)
+	}))
+	defer server.Close()
+
+	item, err := uploadOneDriveSession(context.Background(), server.Client(), server.URL, bytes.NewReader(content), size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("requests=%d, want 2", calls)
+	}
+	if item.ID != "synthetic-id" || item.Name != "asset.mp4" {
+		t.Fatalf("unexpected completed item: %#v", item)
+	}
+}
+
+func TestOneDriveUploadSessionRejectsNonHTTPSURL(t *testing.T) {
+	if _, err := uploadOneDriveSession(context.Background(), http.DefaultClient, "http://example.test/upload", strings.NewReader("x"), 1); err == nil {
+		t.Fatal("expected non-HTTPS upload URL to be rejected")
 	}
 }
 
